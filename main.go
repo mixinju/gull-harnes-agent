@@ -8,6 +8,8 @@ import (
 	"os"
 	"time"
 
+	"gull-herness-agent/prompt"
+	"gull-herness-agent/skill"
 	"gull-herness-agent/tool"
 
 	"github.com/openai/openai-go"
@@ -59,10 +61,31 @@ func main() {
 	registry.Register(tool.NewFileReadTool())
 	registry.Register(tool.NewFileWriteTool())
 
-	fmt.Printf("已注册 %d 个工具: %v\n", registry.Size(), registry.Names())
+	// 从 skills/ 目录加载 Skill
+	loader := skill.NewLoader("./skills")
+	skills, err := loader.Load()
+	if err != nil {
+		log.Fatalf("加载 Skill 失败: %v", err)
+	}
+	fmt.Printf("已加载 %d 个 Skill\n", len(skills))
+
+	// 注册 use_skill 工具，让模型可以按需加载 Skill 的完整文档
+	if len(skills) > 0 {
+		registry.Register(tool.NewUseSkillTool(skills))
+		fmt.Printf("已注册 %d 个工具: %v\n", registry.Size(), registry.Names())
+	}
+
+	// 用结构化 Builder 组装 System Prompt
+	pb := prompt.NewBuilder().
+		WithIdentity(prompt.DefaultIdentity).
+		WithSkills(skills).
+		WithRule(prompt.RuleSelfDebug).
+		WithRule(prompt.RuleReadBeforeWrite).
+		WithRule(prompt.RuleFailGracefully).
+		WithWorkingContext()
 
 	messages := []openai.ChatCompletionMessageParamUnion{
-		openai.SystemMessage("你是一个全能的编程助手，可以执行 bash 命令、读写文件，还可以查询天气。遇到问题尽量自己动手排查，可以用命令验证猜想，也可以读写文件来解决问题。"),
+		openai.SystemMessage(pb.Build()),
 		openai.UserMessage("北京今天天气怎么样？"),
 	}
 

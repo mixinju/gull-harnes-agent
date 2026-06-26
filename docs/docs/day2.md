@@ -289,7 +289,7 @@ func (r *Registry) Dispatch(name string, argsJSON string) (string, error) {
 
 有了接口和注册表，新工具的写法就一个套路：**实现四个方法**。下面快速过一遍 bash、file_read、file_write 三个工具的关键设计——它们和 WeatherTool 的结构完全一致，只是 Execute 里的逻辑不同。
 
-### BashTool —— 命令执行
+### BashTool：命令执行
 
 **核心**：`exec.CommandContext(ctx, "bash", "-c", command)`
 
@@ -320,7 +320,7 @@ if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 
 为什么要截断输出？因为模型每轮都把**完整历史**发给 LLM，一个 `ls -R /` 的输出可能吃掉几十万 token，下一轮就直接报 API 异常了。截断是 Agent 编程里很常见的"上下文保护"手段。
 
-### FileReadTool —— 文件读取
+### FileReadTool：文件读取
 
 **核心**：`os.ReadFile` + 按行 split + 行号标注
 
@@ -355,7 +355,7 @@ for i := offset - 1; i < end; i++ {
 `json.Unmarshal` 把 JSON number 解码为 `float64`，而 offset 和 limit 都是整数。`tool/file_read.go` 里有一个 `toInt()` 函数做类型桥接——这是 JSON → Go 参数传递中很容易踩的坑，新手注意。
 :::
 
-### FileWriteTool —— 文件写入
+### FileWriteTool：文件写入
 
 **核心**：`os.MkdirAll` + `os.WriteFile`
 
@@ -405,7 +405,7 @@ registry.Register(tool.NewFileWriteTool())
 本教程聚焦于 Agent Loop 的核心原理，安全加固留到进阶章节再展开。现在先让 Agent 跑起来——后面我们再把这些防护一层层加上去。
 :::
 
-## 第四步：接入 main.go —— 迁移对比
+## 第四步：接入 main.go
 
 这是最直观的部分。把 Day 1 和 Day 2 的 `main.go` 关键部分并排对比。
 
