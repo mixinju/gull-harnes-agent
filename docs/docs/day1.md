@@ -337,7 +337,7 @@ if used >= tokenThreshold {
 
 `tokenThreshold` 设为 200,000，这是大多数模型的上下文窗口上限。接近这个值时主动终止，比等 API 报错更可控——你可以在退出的回调里做摘要压缩或告警。
 
-### 2.5 处理逻辑：执行工具并回填结果
+### 执行工具并回填结果
 
 四个终止条件都不满足，说明模型发起了工具调用、任务还在进行中。这就进入了"问题二"的处理逻辑——执行工具、把结果回填，再进入下一轮：
 
@@ -367,6 +367,12 @@ for _, call := range msg.ToolCalls {
 
 ## 第三步：dispatchTool —— 工具路由
 
+一个成熟的Agent应该有一个负责执行和分发Tool执行的的部分，目前我们的实现比较简单，只是将API的执行工具氢气执行分发到实际的工具上，对应的逻辑也很简单，就是根据工具的名称进行匹配。
+
+:::info
+在一些Cloud Agent 产品中，Tool的执行和Agent的执行是解耦的、分布式的、就更加需要一个类似于Tool 的注册中心来承担这部分的职责
+:::
+
 ```go
 func dispatchTool(call openai.ChatCompletionMessageToolCall) string {
     var args map[string]any
@@ -388,8 +394,9 @@ func dispatchTool(call openai.ChatCompletionMessageToolCall) string {
 
 注意错误处理：解析失败时返回错误**字符串**而不是抛出异常。因为错误信息会作为 tool message 回传给模型，模型看到 `"解析工具参数失败"` 后会意识到调用出了问题，可能重试或向用户解释。把错误作为值返回而不是崩溃，是 Agent 编程的一个重要模式。
 
-## 完整可运行代码
 
+## 完整可运行代码
+经过以上处理，整个Agent基本就可以跑起来了，可以执行一个最简单的基于天气相关的任务。
 ```go
 package main
 
