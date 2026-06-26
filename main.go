@@ -5,9 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"math/rand"
 	"os"
 	"time"
+
+	"gull-herness-agent/tool"
 
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
@@ -51,34 +52,24 @@ func main() {
 		option.WithBaseURL(baseURL),
 	)
 
+	// 初始化工具注册表，注册所有可用工具
+	registry := tool.NewRegistry()
+	registry.Register(tool.NewWeatherTool())
+	registry.Register(tool.NewBashTool())
+	registry.Register(tool.NewFileReadTool())
+	registry.Register(tool.NewFileWriteTool())
+
+	fmt.Printf("已注册 %d 个工具: %v\n", registry.Size(), registry.Names())
+
 	messages := []openai.ChatCompletionMessageParamUnion{
-		openai.SystemMessage("你是一个简洁友好的助手，必要时可以调用工具来获取信息。"),
+		openai.SystemMessage("你是一个全能的编程助手，可以执行 bash 命令、读写文件，还可以查询天气。遇到问题尽量自己动手排查，可以用命令验证猜想，也可以读写文件来解决问题。"),
 		openai.UserMessage("北京今天天气怎么样？"),
 	}
 
-	tools := []openai.ChatCompletionToolParam{
-		{
-			Function: openai.FunctionDefinitionParam{
-				Name:        "getWeather",
-				Description: openai.String("查询指定城市的当前天气"),
-				Parameters: openai.FunctionParameters{
-					"type": "object",
-					"properties": map[string]any{
-						"city": map[string]any{
-							"type":        "string",
-							"description": "要查询天气的城市名，例如：北京、上海",
-						},
-					},
-					"required": []string{"city"},
-				},
-			},
-		},
-	}
-
-	runAgentLoop(client, messages, tools)
+	runAgentLoop(client, registry, messages)
 }
 
-// runAgentLoop 是 agent 主循环：反复“调用模型 -> 执行工具 -> 回填结果”，
+// runAgentLoop 是 agent 主循环：反复"调用模型 -> 执行工具 -> 回填结果"，
 // 直到满足以下任一终止条件：
 //  1. 达到最大迭代次数 maxIterations；
 //  2. 模型本轮没有发起工具调用（已给出最终回复）；
@@ -86,8 +77,8 @@ func main() {
 //  4. 累计 token 用量达到 tokenThreshold（从 resp.Usage.TotalTokens 读取）。
 func runAgentLoop(
 	client openai.Client,
+	registry *tool.Registry,
 	messages []openai.ChatCompletionMessageParamUnion,
-	tools []openai.ChatCompletionToolParam,
 ) {
 	for i := 1; i <= maxIterations; i++ {
 		fmt.Printf("=== iteration %d ===\n", i)
@@ -95,7 +86,7 @@ func runAgentLoop(
 		params := openai.ChatCompletionNewParams{
 			Model:    "deepseek-v4-flash",
 			Messages: messages,
-			Tools:    tools,
+			Tools:    registry.ToChatCompletionTools(),
 		}
 
 		// 记录请求体
@@ -142,7 +133,7 @@ func runAgentLoop(
 
 		// 执行模型请求的所有工具调用，并把结果作为 tool 消息回填
 		for _, call := range msg.ToolCalls {
-			result := dispatchTool(call)
+			result := dispatchTool(registry, call)
 			fmt.Printf("[tool] %s -> %s\n", call.Function.Name, result)
 			messages = append(messages, openai.ToolMessage(result, call.ID))
 		}
@@ -151,19 +142,13 @@ func runAgentLoop(
 	log.Printf("达到最大迭代次数 %d，终止 agent loop", maxIterations)
 }
 
-// dispatchTool 根据工具名分发到对应的本地实现。
-func dispatchTool(call openai.ChatCompletionMessageToolCall) string {
-	var args map[string]any
-	if err := json.Unmarshal([]byte(call.Function.Arguments), &args); err != nil {
-		return fmt.Sprintf("解析工具参数失败: %v", err)
+// dispatchTool 通过注册表分发工具调用。
+func dispatchTool(registry *tool.Registry, call openai.ChatCompletionMessageToolCall) string {
+	result, err := registry.Dispatch(call.Function.Name, call.Function.Arguments)
+	if err != nil {
+		return fmt.Sprintf("工具执行失败: %v", err)
 	}
-	switch call.Function.Name {
-	case "getWeather":
-		city, _ := args["city"].(string)
-		return getWeather(city)
-	default:
-		return fmt.Sprintf("未知工具: %s", call.Function.Name)
-	}
+	return result
 }
 
 // logRequest 将请求体以 JSON 格式写入日志文件。
@@ -186,15 +171,6 @@ func logResponse(iter int, resp *openai.ChatCompletion) {
 	}
 	apiLogger.Printf("\n========== RESPONSE iter=%d (%s) ==========\n%s\n",
 		iter, time.Now().Format(time.RFC3339), string(respJSON))
-}
-
-// getWeather 是一个 mock 的天气查询方法，随机返回天气信息。
-func getWeather(city string) string {
-	conditions := []string{"晴", "多云", "阴", "小雨", "中雨", "雷阵雨", "小雪"}
-	condition := conditions[rand.Intn(len(conditions))]
-	tempC := rand.Intn(30) + 5     // 5 ~ 34 ℃
-	humidity := rand.Intn(60) + 30 // 30 ~ 89 %
-	return fmt.Sprintf("%s 当前天气：%s，气温 %d℃，湿度 %d%%", city, condition, tempC, humidity)
 }
 
 func handleError(err error) {
