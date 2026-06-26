@@ -1,0 +1,25 @@
+{
+  "name": "agent-harness-guide",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "七天从零构建 Agent Harness 框架（Go 语言版）",
+  "scripts": {
+    "dev": "vitepress dev docs",
+    "build": "vitepress build docs",
+    "preview": "vitepress preview docs"
+  },
+  "keywords": [
+    "agent",
+    "harness",
+    "go",
+    "tutorial"
+  ],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "vitepress": "^1.6.4"
+  },
+  "dependencies": {
+    "vitepress-plugin-mermaid": "^2.0.17"
+  }
+}
