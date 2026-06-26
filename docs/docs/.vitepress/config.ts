@@ -1,5 +1,5 @@
-import { defineConfig } from 'vitepress'
-import { withMermaid } from 'vitepress-plugin-mermaid'
+import {defineConfig} from 'vitepress'
+import {withMermaid} from 'vitepress-plugin-mermaid'
 
 export default withMermaid(
   defineConfig({
@@ -24,7 +24,6 @@ export default withMermaid(
             { text: 'Day 2 · 内置工具与注册表', link: '/day2' },
             { text: 'Day 3 · System Prompt 工程', link: '/day3' },
             { text: 'Day 4 · Skill 注册与加载', link: '/day4' },
-            { text: 'Day 4+ 阶段总结', link: '/summary-01' },
             { text: 'Day 5 · MCP 客户端', link: '/day5' },
             { text: 'Day 6 · 消息管理与对话压缩', link: '/day6' },
             { text: 'Day 7 · 整合与 CLI 交互', link: '/day7' },

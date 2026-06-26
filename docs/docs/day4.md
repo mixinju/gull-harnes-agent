@@ -779,6 +779,219 @@ Skill 信息分为"元数据"（name + description，< 50 token）和"领域知�
 
 今天把 Agent 从"通用助手"升级为"可定向的专业助手"——通过 SKILL.md + Loader + use_skill 三步，实现了领域知识的**按需加载**。新增一个 Skill 只需要在 `skills/` 下创建一个目录和 SKILL.md 文件，不用改一行代码。
 
+---
+
+## 重构
+
+Skill 是 Days 1-4 的最后一块拼图。现在 `main.go` 里散落着 Builder、Registry、runAgentLoop——它们是 Agent 的核心逻辑，但写法还是"脚本级"的全局函数。用 Go 的话说：**该收拢为一个结构体了**，我们进行适当的重构，重新梳理一下代码。
+
+### 问题
+
+`main.go` 承载了太多职责——`runAgentLoop`、`dispatchTool`、`handleError`、`logRequest`、`logResponse` 都是全局函数，复用性为零。想创建两个不同配置的 Agent（一个做代码审查、一个做天气查询），唯一的办法是复制粘贴主循环代码。
+
+### 方案：Agent 结构体 + Options 模式
+
+把 Builder、Registry、主循环、错误处理、日志——所有 Agent 相关的状态和行为收拢为一个 `Agent` 结构体：
+
+```go
+// agent/agent.go
+type Agent struct {
+    client          *openai.Client
+    model           string
+    registry        *tool.Registry
+    promptBuilder   *prompt.Builder
+    messages        []openai.ChatCompletionMessageParamUnion
+    maxIterations   int
+    tokenThresh     int
+    logger          *log.Logger
+}
+
+// 函数式选项模式——调用方按需注入配置
+func New(client *openai.Client, opts ...Option) *Agent {
+    a := &Agent{
+        client:        client,
+        model:         "gpt-4o-mini",
+        maxIterations: 10,
+        tokenThresh:   200_000,
+    }
+    for _, opt := range opts {
+        opt(a)
+    }
+    return a
+}
+
+// 一行创建，一行启动
+ag := agent.New(client,
+    agent.WithRegistry(registry),
+    agent.WithPrompt(pb),
+    agent.WithMessages([]openai.ChatCompletionMessageParamUnion{
+        openai.UserMessage("北京今天天气怎么样？"),
+    }),
+)
+ag.Run()
+```
+
+`Run()` 方法内部就是原来 `runAgentLoop` 的逻辑——调用 LLM、分发工具、回填结果、循环直到模型不再发起 tool_calls。只是现在它是 `Agent` 的方法，访问的是结构体字段，不再是全局变量。
+
+### main.go 从"编排者"退化为"启动器"
+
+重构后 `main.go` 只做一件事：创建 Agent 并启动。
+
+```go
+// main.go
+func main() {
+    client := openai.NewClient(
+        option.WithAPIKey(os.Getenv("LLM_API_KEY")),
+        option.WithBaseURL(os.Getenv("LLM_BASE_URL")),
+    )
+    registry := tool.NewRegistry()
+    registry.Register(tool.NewWeatherTool())
+    registry.Register(tool.NewBashTool())
+    registry.Register(tool.NewFileReadTool())
+    registry.Register(tool.NewFileWriteTool())
+
+    skills, _ := skill.NewLoader("skills").Load()
+    skillPtrs := make([]*skill.Skill, len(skills))
+    for i := range skills {
+        skillPtrs[i] = &skills[i]
+    }
+    registry.Register(tool.NewUseSkillTool(skillPtrs))
+
+    pb := prompt.NewBuilder().
+        WithSkills(skillPtrs).
+        Build()
+
+    agent.New(client,
+        agent.WithRegistry(registry),
+        agent.WithPrompt(pb),
+        agent.WithMessages([]openai.ChatCompletionMessageParamUnion{
+            openai.UserMessage("北京今天天气怎么样？"),
+        }),
+    ).Run()
+}
+```
+
+对比重构前后的变化：
+
+| 指标 | Before | After |
+|------|--------|-------|
+| main.go 行数 | ~200 行 | ~90 行 |
+| 循环逻辑 | `runAgentLoop` 全局函数 | `Agent.Run()` 方法 |
+| 工具分发 | `dispatchTool` 全局函数 | `agent.dispatch()` 私有方法 |
+| 配置方式 | 全局常量 | Option 注入到 Agent 字段 |
+| 复用 | 复制粘贴 main.go | 一行 `agent.New(...).Run()` |
+
+### 为什么收敛到结构体，而不是保持全局函数？
+
+散落的全局函数意味着 **Agent 和你的项目是一体的**。收敛为结构体后，Agent 变成了一个**可复用的组件**：
+
+```go
+// 同一进程跑两个不同配置的 Agent，互不干扰
+codeReviewer := agent.New(client, agent.WithRegistry(crRegistry), agent.WithPrompt(crPrompt))
+weatherBot   := agent.New(client, agent.WithRegistry(wRegistry),  agent.WithPrompt(wPrompt))
+go codeReviewer.Run()
+go weatherBot.Run()
+```
+
+这一步把 Agent 从"这个项目的 main 函数"升级为"任意项目都可以引用并配置的模块"——是从"写脚本"到"写框架"的关键转折。
+
+### 四日成果：当前项目全景
+
+```
+gull-herness-agent/
+├── main.go                  # 启动器：创建 Agent 并启动（~90 行）
+│
+├── agent/                   # Agent 封装层
+│   └── agent.go             #   Agent 结构体 + Options + Run()
+│
+├── tool/                    # 工具包：Tool 接口 + 注册表 + 5 个工具
+│   ├── tool.go              #   Tool 接口、Registry 注册表
+│   ├── weather.go           #   WeatherTool（getWeather）
+│   ├── bash.go              #   BashTool
+│   ├── file_read.go         #   FileReadTool
+│   ├── file_write.go        #   FileWriteTool
+│   └── use_skill.go         #   UseSkillTool
+│
+├── skill/                   # Skill 包：SKILL.md 解析 + 目录扫描
+│   ├── skill.go             #   Skill 结构体、frontmatter 解析
+│   └── loader.go            #   Loader 目录扫描
+│
+├── prompt/                  # Prompt 包：结构化 System Prompt 生成
+│   ├── prompt.go            #   Builder（身份 + Skill + 准则 + 环境）
+│   └── system.go            #   默认常量
+│
+└── skills/                  # Skill 仓库（目录即 Skill）
+    └── code-review/
+        └── SKILL.md
+```
+
+7 个包、12 个文件——你已经有了一个可扩展、可复用的 Agent 框架骨架。
+
+### 运行时架构图
+
+```mermaid
+flowchart TB
+    subgraph main.go
+        AG[Agent 结构体]
+    end
+
+    subgraph Agent 内部
+        direction TB
+        P[PromptBuilder]
+        R[Registry]
+        L[Agent.Run]
+    end
+
+    subgraph 启动流程
+        S1[注册基础工具] --> S2[加载 Skill] --> S3[组装 Prompt] --> S4[注入 context]
+    end
+
+    subgraph 运行循环
+        L --> LLM[调用 LLM]
+        LLM --> TC{tool_calls?}
+        TC -->|有| DISP[Registry.Dispatch]
+        TC -->|无| OUT[输出最终回复]
+        DISP --> T1[weather]
+        DISP --> T2[bash]
+        DISP --> T3[file_read]
+        DISP --> T4[file_write]
+        DISP --> T5[use_skill]
+        T1 & T2 & T3 & T4 & T5 -->|回填结果| L
+    end
+
+    AG --> P
+    AG --> R
+    AG --> L
+    S1 --> R
+    S2 --> P
+    S3 --> P
+```
+
+### 综合示例：当前 Agent 能做什么
+
+以一个对话为例，展示前四天成果的综合能力：
+
+```
+用户: "把 main.go 里的 tokenThreshold 从 200000 改成 100000，然后审查改动是否正确"
+
+=== iteration 1 ===
+[tool] file_read → main.go（179 行，带行号）
+=== iteration 2 ===
+[tool] file_write → 已写入 main.go（修改完成）
+=== iteration 3 ===
+[tool] use_skill → code-review 代码审查指南
+=== iteration 4 ===
+[tool] file_read → main.go（确认改动）
+=== iteration 5 ===
+模型未发起工具调用，结束 agent loop
+改动正确：tokenThreshold 已从 200000 改为 100000，
+且没有引入新的魔法数字。建议将 100000 也提取为常量。
+```
+
+这个对话用到了 file_read + file_write（Day 2）+ use_skill（Day 4）+ Agent Loop 多轮推理（Day 1），Prompt 中还有"先读后改"准则（Day 3）约束行为——四天的成果在一条对话中协同工作。
+
+---
+
 ## 下一步
 
-Day 5：Agent 封装——把 Builder、Registry、runAgentLoop 三者收拢为一个 `Agent` 结构体，从"写脚本"升级到"写框架"。
+Day 5：MCP 客户端——让 Agent 通过标准协议调用外部服务，不再局限于本地工具。
