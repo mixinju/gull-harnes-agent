@@ -176,18 +176,14 @@ JSON-RPC 2.0 是一个**远程过程调用（Remote Procedure Call）标准**，
 
 | 传输方式 | 工具在哪 | 怎么连 | 谁用这种方式 |
 |---------|---------|--------|------------|
-| **stdio** | 你本机的子进程 | 启动一个程序，通过它的输入/输出管道通信 | filesystem server（读写本地文件） |
-| **SSE** | 远程服务器 | HTTP 长连接（旧规范，2024 年） | 老式远程 MCP server |
-| **Streamable HTTP** | 远程服务器 | 单个 HTTP 端点（新规范，2025 年） | **高德地图**、Cloudflare 等新 server |
+| **stdio** | 你本机的子进程 | 启动一个程序，通过它的输入/输出管道通信。就像在终端跑 `npx @modelcontextprotocol/server-filesystem /tmp`，程序等着你往 stdin 喂 JSON，处理完往 stdout 吐 JSON | filesystem server（读写本地文件） |
+| **SSE**（旧规范，2024 年） | 远程服务器 | 先 `GET /sse` 建立一条 HTTP 长连接，服务器返回一个 endpoint 地址，再 `POST` 到那个地址发请求——两次连接 | 老式远程 MCP server |
+| **Streamable HTTP**（新规范，2025 年） | 远程服务器 | 直接往单个端点（如 `https://mcp.amap.com/mcp`）发 POST 请求就行——一次连接搞定，更简单 | **高德地图**、Cloudflare 等新 server |
 
-**stdio 最直观**：就像你在终端跑 `npx @modelcontextprotocol/server-filesystem /tmp`，这个程序启动后就等着你往它 stdin 喂 JSON 消息，处理完往 stdout 吐 JSON 结果。你的 Agent 就是那个"喂消息"的人。
 
-**SSE 和 Streamable HTTP 都是连远程服务**，区别是"握手方式"不同：
-
-- **SSE**（旧）：先 `GET /sse` 建立一条长连接，高德告诉你"以后把请求 POST 到这个地址"——两次连接
-- **Streamable HTTP**（新）：直接往 `https://mcp.amap.com/mcp` 发 POST 请求就行——一次连接搞定，更简单
-
-**问题是：这两种握手方式不兼容。** 你的 Agent 拿到一个 `url`，没法自动猜出对方是 SSE 还是 Streamable——猜错了握手就失败。所以配置文件里需要 `type` 字段让你显式声明。
+:::info SSE和Streamable兼容性处理
+SSE 和 Streamable HTTP 的握手方式不兼容。你的 Agent 拿到一个 `url`，无法自动确认MCP服务端具体是哪一种协议。所以配置文件里需要 `type` 字段显式声明具体的类型
+:::
 
 高德用的是 Streamable HTTP（新规范），所以配置里写 `"type": "streamable"`：
 
@@ -237,39 +233,111 @@ sequenceDiagram
     C->>S: 关闭 HTTP 连接
 ```
 
-**阶段 ①（启动时，只做一次）**：Agent 启动时连上高德，握手确认身份，然后 `tools/list` 拿到 15 个工具的清单。每个工具被包装成 `Adapter` 注册到 Registry——从此 Registry 里就多了 15 个工具，和内置的 `weather`、`bash` 平起平坐。
+| 阶段        | 时机 | 做什么 | 高德例子 |
+|-----------|------|--------|---------|
+| **初始化**   | 启动时（只做一次） | 握手确认身份，`tools/list` 拿到工具清单，每个工具包装成 `Adapter` 注册到 Registry | 连上高德，拿到 15 个工具，注册后和内置 `weather`、`bash` 平起平坐 |
+| **运行时调用** | 每次对话 | LLM 通过 Function Calling 决定调哪个工具 → Agent Loop 在 Registry 找到它 → `Adapter` 通过 HTTP 转发给 MCP server → 结果回填给 LLM | 用户问"北京天气"→ LLM 调 `maps_weather` → 转发给高德 → 天气 JSON 回填。**Agent Loop 不知道 `maps_weather` 是远程的** |
+| **优雅关闭**  | 程序退出时 | `defer cleanup()` 关闭所有连接，MCP server 释放资源 | 关闭与高德的 HTTP 连接 |
 
-**阶段 ②（运行时，每次对话）**：用户问"北京天气"，LLM 通过 Function Calling 决定调 `maps_weather`。Agent Loop 在 Registry 里找到这个工具，执行它——但实际执行时，`Adapter` 把调用通过 HTTP 转发给高德 server，高德查完天气返回 JSON，`Adapter` 把结果文本回填给 LLM。**整个过程 Agent Loop 不知道 `maps_weather` 是远程的**。
+:::info 为什么说"对 Agent Loop 透明"？
 
-**阶段 ③（退出时）**：`defer cleanup()` 关闭所有连接，高德 server 那边也释放资源。
+仔细看上面三个阶段，**运行时调用**这一步和 Day 1-4 的 Agent Loop 完全一样——依然是 LLM 输出 `tool_calls`、Agent Loop 在 Registry 里找工具、执行、回填 `ToolMessage`。MCP 没有给 Agent Loop 加任何新逻辑。
 
-关键洞察：**阶段 ② 和 Day 1-4 的 Agent Loop 完全一样**。MCP 的所有复杂性都被压缩在阶段 ①（连接）和 `Adapter`（转发）里——这就是"对 Agent Loop 透明"的含义。
+MCP 的所有复杂性都被压缩在两个地方：
+
+- **初始化阶段**：连上 MCP server、握手、`tools/list` 拉工具清单、包装成 `Adapter` 注册——这些只在启动时做一次，Agent Loop 看不到
+- **Adapter 内部**：`Adapter.Execute` 表面上是本地方法调用，内部却通过 `tools/call` 把请求转发给远程 MCP server——这个"本地还是远程"的差异被 Adapter 封装了
+
+所以从 Agent Loop 的视角看，`maps_weather` 和内置的 `weather` 没有任何区别：都是 Registry 里的一个工具，都能 `Dispatch` 执行，都返回文本结果。这就是"**对 Agent Loop 透明**"的含义——你甚至可以把内置 `weather` 删掉，只留高德的 `maps_weather`，Agent Loop 一行代码都不用改。
+:::
 
 ### 2.6 高德到底给了我哪些工具？
 
-连接成功后，`tools/list` 真实返回的 15 个工具（这就是你的 Agent 免费获得的能力）：
+连接成功后，`tools/list` 真实返回的 15 个工具（这就是你的 Agent 免费获得的能力）。这是真实的 JSON-RPC 交互，点击展开查看：
 
-| 工具名 | 能干嘛 | 用户会怎么问 |
-|-------|--------|------------|
-| `maps_weather` | 查城市天气 | "北京今天天气怎么样" |
-| `maps_text_search` | 关键字搜 POI | "搜一下天安门" |
-| `maps_around_search` | 周边搜（带半径） | "望京附近 1 公里的咖啡店" |
-| `maps_search_detail` | POI 详情 | "这个店的电话是多少" |
-| `maps_geo` | 地址转坐标 | "望京的经纬度是多少" |
+:::details 请求：tools/list
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/list"
+}
+```
+
+:::
+
+:::details 响应：15 个工具的清单
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "tools": [
+      {
+        "name": "maps_weather",
+        "description": "根据城市名称或者标准adcode查询指定城市的天气",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "city": { "type": "string", "description": "城市名称或adcode" }
+          },
+          "required": ["city"]
+        }
+      },
+      {
+        "name": "maps_text_search",
+        "description": "关键字搜索 API 根据用户输入的关键字进行 POI 搜索，并返回相关的信息",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "keywords": { "type": "string", "description": "搜索关键词" }
+          },
+          "required": ["keywords"]
+        }
+      },
+      {
+        "name": "maps_direction_bicycling",
+        "description": "骑行路径规划用于规划骑行通勤方案，规划时会考虑天桥、单行线、封路等情况。最大支持 500km 的骑行路线规划",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "origin":      { "type": "string", "description": "出发点经纬度，坐标格式为：经度，纬度" },
+            "destination": { "type": "string", "description": "目的地经纬度，坐标格式为：经度，纬度" }
+          },
+          "required": ["origin", "destination"]
+        }
+      }
+    ]
+  }
+}
+```
+
+:::
+
+
+| 工具名 | 能干嘛 | 用户可以怎么问            |
+|-------|--------|--------------------|
+| `maps_weather` | 查城市天气 | "北京今天天气怎么样"        |
+| `maps_text_search` | 关键字搜 POI | "搜一下天安门"           |
+| `maps_around_search` | 周边搜（带半径） | "望京附近 1 公里的咖啡店"    |
+| `maps_search_detail` | POI 详情 | "这个店的电话是多少"        |
+| `maps_geo` | 地址转坐标 | "望京的经纬度是多少"        |
 | `maps_regeocode` | 坐标转地址 | "116.47,39.99 是哪儿" |
-| `maps_direction_driving` | 驾车导航 | "从望京开车到国贸怎么走" |
-| `maps_direction_walking` | 步行导航 | "走路到最近的地铁站" |
-| `maps_direction_bicycling` | 骑行导航 | "骑车到公司多远" |
-| `maps_direction_transit_integrated` | 公交地铁 | "坐地铁去北京南站" |
-| `maps_distance` | 测距离 | "望京和国贸隔多远" |
-| `maps_ip_location` | IP 定位 | "这个 IP 在哪个城市" |
-| `maps_schema_navi` | 唤起导航 APP | "打开导航去天安门" |
-| `maps_schema_take_taxi` | 唤起打车 | "帮我叫个车去机场" |
-| `maps_schema_personal_map` | 行程展示 | "把这些地点串成一条路线" |
+| `maps_direction_driving` | 驾车导航 | "从望京开车到国贸怎么走"      |
+| `maps_direction_walking` | 步行导航 | "走路到最近的地铁站"        |
+| `maps_direction_bicycling` | 骑行导航 | "骑车到公司多远"          |
+| `maps_direction_transit_integrated` | 公交地铁 | "坐地铁去北京南站"         |
+| `maps_distance` | 测距离 | "望京和国贸隔多远"         |
+| `maps_ip_location` | IP 定位 | "这个 IP 在哪个城市"      |
+| `maps_schema_navi` | 唤起导航 APP | "打开导航去天安门"         |
+| `maps_schema_take_taxi` | 唤起打车 | "帮我叫个车去机场"         |
+| `maps_schema_personal_map` | 行程展示 | "把这些地点串成一条路线"      |
 
-每一个工具都带完整的 `name`、`description`、`inputSchema`（参数的 JSON Schema），LLM 拿到后就能自动判断该不该调、怎么调。
+响应里的每个工具都包含 `name`（工具名）、`description`（描述）、`inputSchema`（参数 JSON Schema）三要素。我们的 `Adapter` 拿到这个清单后，把每个工具包装成 `tool.Tool` 接口注册进 Registry——从此 LLM 就能通过 Function Calling 调用它们了。
 
-比如 `maps_direction_bicycling` 的参数定义（真实返回）：
+下面单独看一个工具的参数定义。比如 `maps_direction_bicycling` 的 `inputSchema`：
 
 ```json
 {
@@ -282,13 +350,14 @@ sequenceDiagram
 }
 ```
 
+这个定义其实和前面说的 `Function Call/Tool` 调用时基本一致的，就是要告诉大模型这个调用的名称和具体的参数。
 LLM 看了这个 schema 就知道：要调这个工具，必须提供起点和终点的经纬度。如果用户只说了地名，LLM 会先调 `maps_geo` 把地名转成坐标，再调 `maps_direction_bicycling`——**多步推理，全靠工具描述驱动，你一行代码都没写**。
 
-这就是 MCP 的威力：**别人负责写工具和文档，你的 Agent 只负责连上去用**。
+这就是 MCP 的优势：**别人负责写工具和文档，你的 Agent 只负责连上去用**。
 
 ---
 
-## 第三步：mcp.json 配置设计
+## 第三步：配置文件设计
 
 配置文件声明所有 MCP server，传输方式由字段组合推断：
 
@@ -344,7 +413,7 @@ type ServerConfig struct {
 
 ## 第四步：Client 实现——使用官方 SDK
 
-我们不再手写 JSON-RPC 客户端，而是使用官方的 Go MCP SDK（`github.com/modelcontextprotocol/go-sdk`）。它提供了完整的 transport 实现和协议握手。
+我们不再手写 `JSON-RPC` 客户端，而是使用官方的 Go MCP SDK（`github.com/modelcontextprotocol/go-sdk`）。它提供了完整的 transport 实现和协议握手。
 
 ### 核心：connectClient 辅助函数
 
@@ -683,20 +752,23 @@ defer mcp.LoadAll(registry, "mcp.json")()
 | `maps_schema_take_taxi` | 唤起打车 |
 | `maps_schema_personal_map` | 行程规划展示 |
 
-### 对话示例
+## 对话示例
 
-先以天气查询为例，完整展示一轮 Agent Loop 背后的 API 层交互——发给 LLM 什么、LLM 返回什么、工具执行后怎么回填。
+先以天气查询为例，完整展示一轮 Agent Loop 背后的 API 层交互——发给 LLM 什么、LLM 返回什么、工具执行后怎么回填。后面两个场景省略 API 层细节，只展示工具调用和结果。
 
-**场景一：查天气（完整 API 层）**
+---
+
+### 场景一：查天气（完整 API 层）
 
 ```
 用户: "北京今天天气怎么样？"
 ```
 
-=== iteration 1 ===
+##### iteration 1
 
 **发给 LLM 的请求**（messages 数组，tools 已含 maps_weather 等 15 个 MCP 工具，此处只展示 maps_weather 一个）：
 
+:::details 请求体
 ```json
 {
   "messages": [
@@ -721,9 +793,11 @@ defer mcp.LoadAll(registry, "mcp.json")()
   ]
 }
 ```
+:::
 
 **LLM 返回**（决定调用 `maps_weather`）：
 
+:::details 响应体
 ```json
 {
   "role": "assistant",
@@ -740,6 +814,7 @@ defer mcp.LoadAll(registry, "mcp.json")()
   ]
 }
 ```
+:::
 
 **工具执行**（Agent Loop 调 Registry → Adapter → MCP Client → 高德 server）：
 
@@ -754,6 +829,7 @@ defer mcp.LoadAll(registry, "mcp.json")()
 
 **结果回填为 ToolMessage**，messages 数组现在变成：
 
+:::details 回填后的 messages 数组
 ```json
 [
   { "role": "system", "content": "你是助手..." },
@@ -762,11 +838,13 @@ defer mcp.LoadAll(registry, "mcp.json")()
   { "role": "tool", "tool_call_id": "call_abc123", "content": "{\"city\":\"北京市\",\"forecasts\":[{\"date\":\"2026-06-26\",\"dayweather\":\"多云\",\"daytemp\":\"34\",\"nighttemp\":\"20\"},{\"date\":\"2026-06-27\",\"dayweather\":\"雷阵雨\",\"daytemp\":\"34\",\"nighttemp\":\"23\"}]}" }
 ]
 ```
+:::
 
-=== iteration 2 ===
+##### iteration 2
 
 带着回填后的 messages 再次请求 LLM。这次 LLM 已经拿到天气数据，不再发起工具调用，直接生成最终回复：
 
+:::details 响应体
 ```json
 {
   "role": "assistant",
@@ -774,8 +852,9 @@ defer mcp.LoadAll(registry, "mcp.json")()
   "tool_calls": null
 }
 ```
+:::
 
-模型未发起工具调用，结束 agent loop。
+模型未发起工具调用，结束 agent loop。最终回复：
 
 ```
 北京今天多云，气温 20~34℃，南风 1-3 级。明天有雷阵雨，气温 23~34℃。
@@ -783,9 +862,7 @@ defer mcp.LoadAll(registry, "mcp.json")()
 
 ---
 
-后面两个场景省略 API 层细节，只展示工具调用和结果：
-
-**场景二：搜索天安门**
+### 场景二：搜索天安门
 
 ```
 用户: "搜一下天安门"
@@ -802,7 +879,7 @@ defer mcp.LoadAll(registry, "mcp.json")()
 找到多个结果：天安门（长安街北侧）、天安门东地铁站（1号线）、天安门广场（东长安街）等。
 ```
 
-**场景三：地理编码**
+### 场景三：地理编码
 
 ```
 用户: "望京的经纬度是多少？"
@@ -814,6 +891,8 @@ defer mcp.LoadAll(registry, "mcp.json")()
 
 望京的经纬度是 116.470293, 39.996171（北京市朝阳区）。
 ```
+
+---
 
 Agent Loop 完全无感知这些工具来自远程 MCP server——对它来说 `maps_weather` 和内置的 `weather` 没有区别。从 API 层看，MCP 工具和内置工具的 `tool_calls` 格式完全一致，区别只在 `Adapter.Execute` 内部是本地执行还是远程 RPC。
 
