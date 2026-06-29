@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"gull-herness-agent/agent"
+	"gull-herness-agent/mcp"
 	"gull-herness-agent/prompt"
 	"gull-herness-agent/skill"
 	"gull-herness-agent/tool"
@@ -51,16 +52,15 @@ func main() {
 	registry.Register(tool.NewFileReadTool())
 	registry.Register(tool.NewFileWriteTool())
 
+	// 从 mcp.json 加载 MCP 工具
+	// 降级策略：配置文件不存在或任何 MCP server 不可用时，不影响内置工具
+	defer mcp.LoadAll(registry, "mcp.json")()
+
 	// 加载 Skill → 注册 use_skill
-	loader := skill.NewLoader("./skills")
-	skills, err := loader.Load()
-	if err != nil {
-		log.Fatalf("加载 Skill 失败: %v", err)
-	}
-	if len(skills) > 0 {
-		registry.Register(tool.NewUseSkillTool(skills))
-		fmt.Printf("已加载 %d 个 Skill，已注册 %d 个工具\n", len(skills), registry.Size())
-	}
+	// 降级策略：目录不存在或单个 Skill 解析失败时只记录日志，不影响主流程
+	skills := skill.NewLoader("./skills").Load()
+	registry.Register(tool.NewUseSkillTool(skills))
+	fmt.Printf("已加载 %d 个 Skill，已注册 %d 个工具\n", len(skills), registry.Size())
 
 	// 组装 System Prompt
 	pb := prompt.NewBuilder().

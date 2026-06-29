@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+    },
+    "amap": {
+      "type": "streamable",
+      "url": "https://mcp.amap.com/mcp?key=e0418666ea72a2bd1dccb584da7fd339"
+    }
+  }
+}
+
