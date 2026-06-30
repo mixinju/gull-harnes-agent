@@ -1,37 +1,15 @@
-# === Go 编译产物 / 中间产物 ===
-# 当前项目生成的可执行文件
-/gull-herness-agent
-# 通用的可执行文件（覆盖子目录构建输出）
-*.exe
-*.exe~
-*.dll
-*.so
-*.dylib
-*.test
-*.out
-*.prof
-*.coverprofile
-coverage.txt
-coverage.html
+# 运行时产物
+logs/
+sessions/
 
-# === Go 工作区 / 缓存 ===
-vendor/
-go.work
-go.work.sum
+# 编译产物
+gull-herness-agent
 
-# === IDE / 编辑器 ===
+# IDE
 .idea/
 .vscode/
 *.swp
 *.swo
-*~
-
-# === 操作系统生成文件 ===
 .DS_Store
-Thumbs.db
-desktop.ini
 
-# === 日志 / 临时文件 ===
-*.log
-tmp/
-
+api_call.log

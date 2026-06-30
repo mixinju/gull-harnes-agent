@@ -1,0 +1,12 @@
+{
+  "api_key": "",
+  "base_url": "",
+  "model": "deepseek-v4-flash",
+  "max_iterations": 10,
+  "context_threshold": 200000,
+  "log_dir": "logs",
+  "session_dir": "sessions",
+  "skills_dir": "./skills",
+  "mcp_config": "config/mcp.json"
+}
+

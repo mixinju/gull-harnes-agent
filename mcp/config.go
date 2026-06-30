@@ -141,7 +141,7 @@ func RegisterAllFromConfig(registry *tool.Registry, configPath string) ([]*Clien
 //
 // 用法：
 //
-//	defer mcp.LoadAll(registry, "mcp.json")()
+//	defer mcp.LoadAll(registry, "config/mcp.json")()
 func LoadAll(registry *tool.Registry, configPath string) func() {
 	clients, err := RegisterAllFromConfig(registry, configPath)
 	if err != nil {
