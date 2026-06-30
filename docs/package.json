@@ -4,9 +4,9 @@
   "type": "module",
   "description": "七天从零构建 Agent Harness 框架（Go 语言版）",
   "scripts": {
-    "dev": "vitepress dev docs",
-    "build": "vitepress build docs",
-    "preview": "vitepress preview docs"
+    "dev": "vitepress dev .",
+    "build": "vitepress build .",
+    "preview": "vitepress preview ."
   },
   "keywords": [
     "agent",
