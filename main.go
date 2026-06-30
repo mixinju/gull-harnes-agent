@@ -71,15 +71,21 @@ func main() {
 		WithRule(prompt.RuleFailGracefully).
 		WithWorkingContext()
 
+	// 创建上下文管理器：带 LLM 摘要能力，token 超阈值时自动压缩历史
+	ctx := agent.NewContext(
+		agent.WithSummarizer(agent.NewLLMSummarizer(client, "deepseek-v4-flash")),
+		agent.WithThreshold(200_000),
+		agent.WithInitialMessages(
+			openai.UserMessage("北京今天天气怎么样？"),
+		),
+	)
+
 	// 创建 Agent 并启动
 	ag := agent.New(client,
 		agent.WithRegistry(registry),
 		agent.WithPrompt(pb),
-		agent.WithMessages([]openai.ChatCompletionMessageParamUnion{
-			openai.UserMessage("北京今天天气怎么样？"),
-		}),
+		agent.WithContext(ctx),
 		agent.WithMaxIterations(10),
-		agent.WithTokenThreshold(200_000),
 		agent.WithLogger(logger),
 	)
 	ag.Run()

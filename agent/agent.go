@@ -17,20 +17,23 @@ import (
 //
 // 使用方式：
 //
+//	ctx := agent.NewContext(
+//	    agent.WithSummarizer(agent.NewLLMSummarizer(client, "deepseek-v4-flash")),
+//	    agent.WithThreshold(200_000),
+//	)
 //	ag := agent.New(client,
 //	    agent.WithRegistry(registry),
 //	    agent.WithPrompt(pb),
-//	    agent.WithMessages(messages),
+//	    agent.WithContext(ctx),
 //	)
 //	ag.Run()
 type Agent struct {
-	client      openai.Client
-	registry    *tool.Registry
-	prompt      *prompt.Builder
-	messages    []openai.ChatCompletionMessageParamUnion
-	maxIter     int
-	tokenThresh int
-	logger      *log.Logger
+	client   openai.Client
+	registry *tool.Registry
+	prompt   *prompt.Builder
+	ctx      *Context
+	maxIter  int
+	logger   *log.Logger
 }
 
 // Option 是 Agent 的函数式选项。
@@ -39,9 +42,8 @@ type Option func(*Agent)
 // New 创建一个 Agent 实例。
 func New(client openai.Client, opts ...Option) *Agent {
 	a := &Agent{
-		client:      client,
-		maxIter:     10,        // 默认值
-		tokenThresh: 200_000,   // 默认值
+		client:  client,
+		maxIter: 10, // 默认值
 	}
 	for _, opt := range opts {
 		opt(a)
@@ -59,19 +61,16 @@ func WithPrompt(pb *prompt.Builder) Option {
 	return func(a *Agent) { a.prompt = pb }
 }
 
-// WithMessages 设置初始消息列表（不包含 System Prompt，Run() 会自动前置）。
-func WithMessages(msg []openai.ChatCompletionMessageParamUnion) Option {
-	return func(a *Agent) { a.messages = msg }
+// WithContext 设置上下文管理器。
+//
+// 如果不传，Run() 会创建一个默认的 Context（CharRatio 估算器，阈值 200_000）。
+func WithContext(c *Context) Option {
+	return func(a *Agent) { a.ctx = c }
 }
 
 // WithMaxIterations 设置最大迭代次数。
 func WithMaxIterations(n int) Option {
 	return func(a *Agent) { a.maxIter = n }
-}
-
-// WithTokenThreshold 设置 token 用量阈值。
-func WithTokenThreshold(n int) Option {
-	return func(a *Agent) { a.tokenThresh = n }
 }
 
 // WithLogger 设置日志记录器。
@@ -84,13 +83,15 @@ func WithLogger(l *log.Logger) Option {
 // 会先根据 prompt Builder 生成 System Prompt 并前置到 messages 最前面，
 // 然后进入主循环：调用 LLM → 处理工具调用 → 回填结果，直到满足终止条件。
 func (a *Agent) Run() {
+	// 如果没传 Context，创建默认的
+	if a.ctx == nil {
+		a.ctx = NewContext()
+	}
+
 	// 前置 System Prompt
 	if a.prompt != nil {
 		sysMsg := a.prompt.Build()
-		a.messages = append(
-			[]openai.ChatCompletionMessageParamUnion{openai.SystemMessage(sysMsg)},
-			a.messages...,
-		)
+		a.ctx.Append(openai.SystemMessage(sysMsg))
 	}
 
 	for i := 1; i <= a.maxIter; i++ {
@@ -98,7 +99,7 @@ func (a *Agent) Run() {
 
 		params := openai.ChatCompletionNewParams{
 			Model:    "deepseek-v4-flash",
-			Messages: a.messages,
+			Messages: a.ctx.Messages(),
 			Tools:    a.registry.ToChatCompletionTools(),
 		}
 
@@ -114,18 +115,30 @@ func (a *Agent) Run() {
 		// 记录响应体
 		a.logResponse(i, resp)
 
-		// 从返回的 usage 中计算 token 用量，超过阈值则提前终止
-		used := resp.Usage.TotalTokens
+		// 用 API 返回的真实 usage 校准 token 总量
+		a.ctx.UpdateUsage(resp.Usage)
 		fmt.Printf("[usage] prompt=%d completion=%d total=%d (threshold=%d)\n",
-			resp.Usage.PromptTokens, resp.Usage.CompletionTokens, used, a.tokenThresh)
-		if used >= int64(a.tokenThresh) {
-			log.Printf("token 用量 %d 达到阈值 %d，终止迭代（iteration %d）", used, a.tokenThresh, i)
-			return
+			resp.Usage.PromptTokens, resp.Usage.CompletionTokens,
+			a.ctx.Tokens(), a.ctx.Threshold())
+
+		// token 超阈值：先尝试压缩，压缩后仍超则终止
+		if a.ctx.ShouldCompact() {
+			log.Printf("[context] token %d 达到阈值 %d，触发压缩（iteration %d）",
+				a.ctx.Tokens(), a.ctx.Threshold(), i)
+			if err := a.ctx.Compact(context.Background()); err != nil {
+				log.Printf("[context] 压缩失败: %v", err)
+				return
+			}
+			// 压缩后重新判断，如果还是超阈值，说明压缩空间有限，终止
+			if a.ctx.ShouldCompact() {
+				log.Printf("[context] 压缩后 token %d 仍超阈值 %d，终止迭代", a.ctx.Tokens(), a.ctx.Threshold())
+				return
+			}
 		}
 
 		choice := resp.Choices[0]
 		msg := choice.Message
-		a.messages = append(a.messages, msg.ToParam())
+		a.ctx.Append(msg.ToParam())
 
 		// finish_reason == "length"：达到 token 上限
 		if choice.FinishReason == "length" {
@@ -147,7 +160,7 @@ func (a *Agent) Run() {
 		for _, call := range msg.ToolCalls {
 			result := a.dispatch(call)
 			fmt.Printf("[tool] %s -> %s\n", call.Function.Name, result)
-			a.messages = append(a.messages, openai.ToolMessage(result, call.ID))
+			a.ctx.Append(openai.ToolMessage(result, call.ID))
 		}
 	}
 
@@ -185,6 +198,6 @@ func (a *Agent) logResponse(iter int, resp *openai.ChatCompletion) {
 
 // handleError 处理 API 调用异常。
 func (a *Agent) handleError(err error) {
-	log.Printf("调用大模型失败" + err.Error())
+	log.Printf("调用大模型失败: %v", err)
 }
 
