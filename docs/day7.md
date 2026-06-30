@@ -81,6 +81,133 @@ $ claude
 - 会话持久化：把每次运行的消息历史和指标保存为 JSON，便于回放
 - Agent 重构：用函数式选项注入用户输入，消除硬编码
 
+## 整体流程
+
+把 Day 1-6 的模块组装后，一次完整的 Agent 运行流程如下：
+
+<svg viewBox="0 0 660 780" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:660px;margin:16px auto;display:block;font-family:-apple-system,'PingFang SC',sans-serif;font-size:12px">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#475569"/>
+    </marker>
+    <marker id="arrR" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8"/>
+    </marker>
+  </defs>
+
+  <!-- ===== 参与者头部 ===== -->
+  <rect x="17" y="15" width="96" height="32" rx="4" fill="#3b82f6" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="65" y="31" text-anchor="middle" dominant-baseline="central" fill="#fff" font-weight="600">User</text>
+  <rect x="147" y="15" width="96" height="32" rx="4" fill="#6366f1" stroke="#4f46e5" stroke-width="1.5"/>
+  <text x="195" y="31" text-anchor="middle" dominant-baseline="central" fill="#fff" font-weight="600">Agent</text>
+  <rect x="277" y="15" width="96" height="32" rx="4" fill="#3b82f6" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="325" y="31" text-anchor="middle" dominant-baseline="central" fill="#fff" font-weight="600">LLM</text>
+  <rect x="407" y="15" width="96" height="32" rx="4" fill="#8b5cf6" stroke="#7c3aed" stroke-width="1.5"/>
+  <text x="455" y="31" text-anchor="middle" dominant-baseline="central" fill="#fff" font-weight="600">Tool</text>
+  <rect x="537" y="15" width="96" height="32" rx="4" fill="#10b981" stroke="#059669" stroke-width="1.5"/>
+  <text x="585" y="31" text-anchor="middle" dominant-baseline="central" fill="#fff" font-weight="600">Session</text>
+
+  <!-- ===== 生命线 ===== -->
+  <line x1="65" y1="47" x2="65" y2="765" stroke="#cbd5e1" stroke-width="1.5" stroke-dasharray="4 4"/>
+  <line x1="195" y1="47" x2="195" y2="765" stroke="#cbd5e1" stroke-width="1.5" stroke-dasharray="4 4"/>
+  <line x1="325" y1="47" x2="325" y2="765" stroke="#cbd5e1" stroke-width="1.5" stroke-dasharray="4 4"/>
+  <line x1="455" y1="47" x2="455" y2="765" stroke="#cbd5e1" stroke-width="1.5" stroke-dasharray="4 4"/>
+  <line x1="585" y1="47" x2="585" y2="765" stroke="#cbd5e1" stroke-width="1.5" stroke-dasharray="4 4"/>
+
+  <!-- ===== Agent 激活条 ===== -->
+  <rect x="190" y="60" width="10" height="700" fill="#6366f1" fill-opacity="0.22" stroke="#6366f1" stroke-width="0.8"/>
+
+  <!-- ===== 消息 1: User → Agent ===== -->
+  <text x="127" y="74" text-anchor="middle" fill="#1e293b">Run(prompt)</text>
+  <line x1="65" y1="82" x2="188" y2="82" stroke="#475569" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- ===== 消息 2: Agent → Session ===== -->
+  <text x="392" y="108" text-anchor="middle" fill="#1e293b">记录 system + user 消息</text>
+  <line x1="200" y1="116" x2="583" y2="116" stroke="#475569" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- ===== loop 片段框 ===== -->
+  <rect x="35" y="138" width="600" height="545" fill="none" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="5 3" rx="2"/>
+  <polygon points="35,138 98,138 106,150 106,158 35,158" fill="#f1f5f9" stroke="#94a3b8" stroke-width="1.2"/>
+  <text x="43" y="151" fill="#1e293b" font-weight="600">loop</text>
+  <text x="73" y="151" fill="#64748b">× N 轮迭代</text>
+
+  <!-- 消息 3: Agent → LLM -->
+  <text x="262" y="178" text-anchor="middle" fill="#1e293b">ChatCompletion(messages, tools)</text>
+  <line x1="200" y1="186" x2="323" y2="186" stroke="#475569" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- 消息 4: LLM → Agent (返回) -->
+  <text x="262" y="214" text-anchor="middle" fill="#1e293b">response(finish_reason, usage)</text>
+  <line x1="325" y1="222" x2="202" y2="222" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="6 4" marker-end="url(#arrR)"/>
+
+  <!-- ===== opt 1: token 超阈值 ===== -->
+  <rect x="50" y="245" width="570" height="105" fill="none" stroke="#f59e0b" stroke-width="1.2" stroke-dasharray="5 3" rx="2"/>
+  <polygon points="50,245 120,245 128,257 128,265 50,265" fill="#fef3c7" stroke="#f59e0b" stroke-width="1.2"/>
+  <text x="58" y="258" fill="#92400e" font-weight="600">opt</text>
+  <text x="82" y="258" fill="#64748b">token 超阈值</text>
+
+  <text x="392" y="282" text-anchor="middle" fill="#1e293b">Compact() 压缩上下文</text>
+  <line x1="200" y1="290" x2="583" y2="290" stroke="#475569" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <text x="392" y="318" text-anchor="middle" fill="#ef4444" font-weight="600">若仍超 → finalize(error) 终止</text>
+  <circle cx="195" cy="338" r="5" fill="#ef4444"/>
+
+  <!-- ===== opt 2: finish_reason = length ===== -->
+  <rect x="50" y="365" width="570" height="65" fill="none" stroke="#f59e0b" stroke-width="1.2" stroke-dasharray="5 3" rx="2"/>
+  <polygon points="50,365 155,365 163,377 163,385 50,385" fill="#fef3c7" stroke="#f59e0b" stroke-width="1.2"/>
+  <text x="58" y="378" fill="#92400e" font-weight="600">opt</text>
+  <text x="82" y="378" fill="#64748b">finish_reason = length</text>
+
+  <text x="392" y="405" text-anchor="middle" fill="#ef4444" font-weight="600">finalize(部分回复) 终止</text>
+  <circle cx="195" cy="420" r="5" fill="#ef4444"/>
+
+  <!-- ===== opt 3: 无工具调用 ===== -->
+  <rect x="50" y="445" width="570" height="90" fill="none" stroke="#f59e0b" stroke-width="1.2" stroke-dasharray="5 3" rx="2"/>
+  <polygon points="50,445 130,445 138,457 138,465 50,465" fill="#fef3c7" stroke="#f59e0b" stroke-width="1.2"/>
+  <text x="58" y="458" fill="#92400e" font-weight="600">opt</text>
+  <text x="82" y="458" fill="#64748b">无工具调用</text>
+
+  <text x="262" y="483" text-anchor="middle" fill="#1e293b">输出最终回复</text>
+  <text x="392" y="508" text-anchor="middle" fill="#10b981" font-weight="600">finalize(completed) 终止</text>
+  <circle cx="195" cy="525" r="5" fill="#10b981"/>
+
+  <!-- ===== 否则：执行工具 ===== -->
+  <text x="125" y="557" fill="#64748b" font-style="italic">否则：模型发起了工具调用</text>
+
+  <!-- 消息: Agent → Tool: Dispatch -->
+  <text x="327" y="582" text-anchor="middle" fill="#1e293b">Dispatch(name, args)</text>
+  <line x1="200" y1="590" x2="453" y2="590" stroke="#475569" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- 消息: Tool → Agent (返回): result -->
+  <text x="327" y="616" text-anchor="middle" fill="#1e293b">result</text>
+  <line x1="455" y1="624" x2="202" y2="624" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="6 4" marker-end="url(#arrR)"/>
+
+  <!-- 消息: Agent → Session: 记录 tool -->
+  <text x="392" y="648" text-anchor="middle" fill="#1e293b">记录 tool 消息</text>
+  <line x1="200" y1="656" x2="583" y2="656" stroke="#475569" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- loop 回流提示 -->
+  <text x="335" y="676" text-anchor="middle" fill="#64748b" font-style="italic">i++，回到循环顶部</text>
+
+  <!-- ===== 最终: Agent → User (返回) ===== -->
+  <text x="127" y="705" text-anchor="middle" fill="#1e293b">完成（消息历史 + 指标）</text>
+  <line x1="190" y1="713" x2="67" y2="713" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="6 4" marker-end="url(#arrR)"/>
+
+  <!-- 终止标记 -->
+  <circle cx="65" cy="745" r="7" fill="none" stroke="#475569" stroke-width="1.5"/>
+  <line x1="60" y1="740" x2="70" y2="750" stroke="#475569" stroke-width="1.5"/>
+  <line x1="70" y1="740" x2="60" y2="750" stroke="#475569" stroke-width="1.5"/>
+</svg>
+
+上图以**序列图**的形式展示了一次完整 Agent 运行的时序交互。顶部 5 个参与者（User / Agent / LLM / Tool / Session）各自有一条垂直生命线，Agent 的紫色激活条贯穿运行全程，消息按时间从上往下依次发生。
+
+灰色 `loop` 框是主循环（× N 轮迭代），每轮先调用 LLM 拿到响应，再顺序经过三个橙色 `opt` 条件分支判断是否终止：
+
+- **token 超阈值** → 压缩上下文，若仍超则 `finalize(error)` 终止（红点）
+- **finish_reason = length** → `finalize(部分回复)` 终止（红点）
+- **无工具调用** → 输出最终回复，`finalize(completed)` 终止（绿点）
+
+三个 `opt` 都不命中时，走"否则"分支：执行工具 → 回填结果 → 记录到 Session → `i++` 回到循环顶部。最终 Agent 把消息历史和指标返回给 User。实线箭头是调用请求，虚线箭头是返回响应。
+
 ---
 
 ## 第一步：配置文件
