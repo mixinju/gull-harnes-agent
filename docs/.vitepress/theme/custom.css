@@ -1,6 +1,56 @@
 /* Keep the sidebar and document layout on the same width value to avoid overlap. */
 :root {
-  --vp-sidebar-width: 240px;
+  --vp-sidebar-width: 200px;
+}
+
+/* 侧边栏：减少默认左侧空白，把宽度留给较长的章节标题。 */
+.VPSidebar {
+  padding-right: 4px !important;
+  padding-left: 16px !important;
+}
+
+.VPSidebarItem.level-0 {
+  padding-bottom: 4px;
+}
+
+.VPSidebarItem.level-0 > .item {
+  padding-right: 4px;
+  padding-left: 4px;
+}
+
+.VPSidebarItem.level-0 > .item .text {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.VPSidebarItem.level-1 {
+  padding-left: 0 !important;
+}
+
+.VPSidebarItem.level-1 > .item {
+  margin: 1px 0;
+  padding-right: 4px;
+  padding-left: 4px;
+  border-radius: 6px;
+}
+
+.VPSidebarItem.level-1 > .item:hover {
+  background: var(--vp-c-bg-soft);
+}
+
+.VPSidebarItem.level-1.is-active > .item {
+  background: var(--vp-c-brand-soft);
+}
+
+.VPSidebarItem.level-1 .link {
+  padding: 3px 0;
+}
+
+.VPSidebarItem.level-1 .text {
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .VPDoc .content-container {
