@@ -1,16 +1,21 @@
 /* Keep the sidebar and document layout on the same width value to avoid overlap. */
 :root {
-  --vp-sidebar-width: 200px;
+  --vp-sidebar-width: 240px;
 }
 
 /* 侧边栏：减少默认左侧空白，把宽度留给较长的章节标题。 */
 .VPSidebar {
   padding-right: 4px !important;
-  padding-left: 16px !important;
+  padding-left: 24px !important;
+}
+
+/* 侧边栏标题居中 */
+.VPSidebar .title {
+  text-align: center;
 }
 
 .VPSidebarItem.level-0 {
-  padding-bottom: 4px;
+  padding-bottom: 2px;
 }
 
 .VPSidebarItem.level-0 > .item {
@@ -21,6 +26,9 @@
 .VPSidebarItem.level-0 > .item .text {
   font-size: 13px;
   font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .VPSidebarItem.level-1 {
