@@ -19,5 +19,4 @@
 
 ## 源码
 
-- [美团 Code](https://git.sankuai.com/~mixinju/gull-harness-agent)
 - [GitHub](https://github.com/mixinju/gull-harnes-agent)
