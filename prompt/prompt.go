@@ -50,9 +50,9 @@ func (b *Builder) WithRule(rule string) *Builder {
 // WithWorkingContext 自动注入运行时上下文信息。
 func (b *Builder) WithWorkingContext() *Builder {
 	workDir, _ := os.Getwd()
-	b.context["工作目录"] = workDir
-	b.context["操作系统"] = runtime.GOOS + "/" + runtime.GOARCH
-	b.context["当前时间"] = time.Now().Format("2006-01-02 15:04:05")
+	b.context["workdir"] = workDir
+	b.context["os"] = runtime.GOOS + "/" + runtime.GOARCH
+	b.context["time"] = time.Now().Format("2006-01-02 15:04:05")
 	return b
 }
 

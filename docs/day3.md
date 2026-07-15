@@ -59,21 +59,30 @@ Day 2 的 prompt 里写了"可以执行 bash 命令、读写文件，还可以�
 
 那么 System Prompt 应该包含哪些信息？拆成三个区段：
 
-```
-┌─────────────────────────────┐
-│  # 身份                      │
-│  你是一个全能的编程助手       │  ← 语气和角色
-├─────────────────────────────┤
-│  # 行为准则                   │
-│  - 遇到问题先自己排查         │  ← 决策边界
-│  - 改文件前先读文件           │
-│  - 失败后解释原因             │
-├─────────────────────────────┤
-│  # 环境信息                   │
-│  - 工作目录: /path/to/project │  ← 运行时注入
-│  - 操作系统: darwin/arm64     │
-│  - 当前时间: 2025-06-26 15:30 │
-└─────────────────────────────┘
+```text
+┌──────────────────────────────────────────────┐
+│  # 身份（语气和角色）                        
+│                                              
+│  你是一个全能的编程助手                      
+└──────────────────────┬───────────────────────┘
+                       │
+                       ▼
+┌──────────────────────────────────────────────┐
+│  # 行为准则（决策边界）                      
+│                                              
+│  • 遇到问题先自己排查                        
+│  • 改文件前先读文件                          
+│  • 失败后解释原因                            
+└──────────────────────┬───────────────────────┘
+                       │
+                       ▼
+┌──────────────────────────────────────────────┐
+│  # 环境信息（运行时注入）                    
+│                                              
+│  workdir: /path/to/project                   
+│  os:      darwin/arm64                       
+│  time:    2025-06-26 15:30                   
+└──────────────────────────────────────────────┘
 ```
 
 那工具清单放哪？**不放进 prompt**。Function Calling 的 `tools` 参数本身就是模型的"工具说明书"——`name`、`description`、`parameters` 都在里面。prompt 里再写一遍等于：浪费 token + 可能不一致 + 新增工具要改两处。
@@ -152,9 +161,9 @@ func (b *Builder) WithRule(rule string) *Builder {
 ```go
 func (b *Builder) WithWorkingContext() *Builder {
     workDir, _ := os.Getwd()
-    b.context["工作目录"] = workDir
-    b.context["操作系统"] = runtime.GOOS + "/" + runtime.GOARCH
-    b.context["当前时间"] = time.Now().Format("2006-01-02 15:04:05")
+b.context["workdir"] = workDir
+	b.context["os"] = runtime.GOOS + "/" + runtime.GOARCH
+	b.context["time"] = time.Now().Format("2006-01-02 15:04:05")
     return b
 }
 ```
@@ -402,9 +411,9 @@ func (b *Builder) WithRule(rule string) *Builder {
 
 func (b *Builder) WithWorkingContext() *Builder {
     workDir, _ := os.Getwd()
-    b.context["工作目录"] = workDir
-    b.context["操作系统"] = runtime.GOOS + "/" + runtime.GOARCH
-    b.context["当前时间"] = time.Now().Format("2006-01-02 15:04:05")
+b.context["workdir"] = workDir
+	b.context["os"] = runtime.GOOS + "/" + runtime.GOARCH
+	b.context["time"] = time.Now().Format("2006-01-02 15:04:05")
     return b
 }
 
