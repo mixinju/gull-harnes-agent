@@ -6,6 +6,7 @@ export default withMermaid(
     title: 'Agent Harness 实战',
     description: '七天用 Go 从零手写 Agent Harness 框架',
     lang: 'zh-CN',
+    base: process.env.SKY_BASE || '/',
 
     themeConfig: {
       logo: '/logo.svg',

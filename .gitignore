@@ -4,6 +4,7 @@ sessions/
 
 # 编译产物
 gull-herness-agent
+build/
 
 # IDE
 .idea/

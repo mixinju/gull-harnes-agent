@@ -1,0 +1,2 @@
+custom_install: 'cd docs && npm ci'
+custom_build: 'cd docs && npm run build'

@@ -1,0 +1,23 @@
+# Gull Agent Harness
+
+> 七天用 Go 从零手写 Agent Harness，涵盖 Agent Loop、工具调用、System Prompt、Skill、MCP、上下文压缩与完整 CLI 组装。
+
+## 教程
+
+- [课程介绍与环境准备](./day0.md): 理解 Agent、Model 与 Harness 的关系，认识 Tool Calling，并完成开发环境准备。
+- [Day 1 · Agent Loop](./day1.md): 实现 think → act → observe 主循环、终止条件、异常处理与工具结果回填。
+- [Day 2 · 内置工具与注册表](./day2.md): 设计统一 Tool 接口、Registry 注册表以及 Bash、文件读写等内置工具。
+- [Day 3 · System Prompt 工程](./day3.md): 将身份、规则、技能与工作上下文动态组装成 System Prompt。
+- [Day 4 · Skill 注册与加载](./day4.md): 实现目录式 Skill、渐进披露与 use_skill 工具。
+- [Day 5 · MCP 客户端](./day5.md): 使用 Model Context Protocol 接入外部工具服务，并实现失败降级。
+- [Day 6 · 消息管理与对话压缩](./day6.md): 实现 Token 估算、真实用量校准、摘要器与自动上下文压缩。
+- [Day 7 · 整合与 CLI 交互](./day7.md): 组装配置、日志、会话、工具、Skill 与 MCP，完成可运行的命令行 Agent。
+
+## 总结
+
+- [阶段架构总结](./summary-01.md): 回顾前四天形成的包结构、模块职责与完整数据流。
+
+## 源码
+
+- [美团 Code](https://git.sankuai.com/~mixinju/gull-harness-agent)
+- [GitHub](https://github.com/mixinju/gull-harnes-agent)
