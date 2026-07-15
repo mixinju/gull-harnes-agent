@@ -1,5 +1,6 @@
 # Gull Agent Harness
 
+[七天教程地址](https://mixinju.github.io/gull-harnes-agent/)
 一个使用 Go 从零实现的轻量级 Agent Harness，同时也是一套循序渐进的七日实战教程。
 
 项目不依赖大型 Agent 框架，直接围绕大模型 API 实现 Agent Loop、工具调用、上下文管理、Skill 扩展和 MCP 集成，帮助你理解 Agent 运行时的核心机制。
