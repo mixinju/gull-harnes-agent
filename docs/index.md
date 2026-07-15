@@ -14,7 +14,7 @@ hero:
       link: /day1
     - theme: alt
       text: 查看源码
-      link: https://git.sankuai.com/~mixinju/gull-harness-agent
+      link: https://github.com/mixinju/gull-harnes-agent/
 
 features:
   - icon:

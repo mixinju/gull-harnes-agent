@@ -1,5 +1,5 @@
-import {defineConfig} from 'vitepress'
-import {withMermaid} from 'vitepress-plugin-mermaid'
+import { defineConfig } from 'vitepress'
+import { withMermaid } from 'vitepress-plugin-mermaid'
 
 export default withMermaid(
   defineConfig({
@@ -13,7 +13,7 @@ export default withMermaid(
 
       nav: [
         { text: '教程', link: '/day0' },
-        { text: 'GitHub', link: 'https://github.com/yourname/agent-harness' }
+        { text: 'GitHub', link: 'https://github.com/mixinju/gull-harnes-agent/' }
       ],
 
       sidebar: [
