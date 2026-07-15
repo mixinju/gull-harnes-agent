@@ -49,39 +49,23 @@ features:
     linkText: 完成最终组装
 ---
 
-<div class="home-intro">
-  <div class="home-intro__eyebrow">WHY GULL</div>
-  <h2>不把 Agent 当作黑盒</h2>
-  <p>模型只是发动机，Harness 才是底盘、方向盘、刹车与导航。本教程绕过大型框架，从最小可运行实现出发，逐步解释一次请求如何演化成自主执行系统。</p>
-</div>
+## 不把 Agent 当作黑盒
 
-<div class="learning-path">
-  <a class="learning-step" href="./day0">
-    <span class="learning-step__day">DAY 0</span>
-    <strong>建立正确心智模型</strong>
-    <small>Harness、Tool Calling 与环境准备</small>
-  </a>
-  <a class="learning-step" href="./day1">
-    <span class="learning-step__day">DAY 1–3</span>
-    <strong>搭起 Agent 骨架</strong>
-    <small>执行循环、工具系统与 Prompt</small>
-  </a>
-  <a class="learning-step" href="./day4">
-    <span class="learning-step__day">DAY 4–6</span>
-    <strong>获得可扩展能力</strong>
-    <small>Skill、MCP 与上下文压缩</small>
-  </a>
-  <a class="learning-step" href="./day7">
-    <span class="learning-step__day">DAY 7</span>
-    <strong>组装完整运行时</strong>
-    <small>配置、日志、会话与 CLI</small>
-  </a>
-</div>
+模型只是发动机，Harness 才是底盘、方向盘、刹车与导航。本教程绕过大型框架，从最小可运行实现出发，逐步解释一次请求如何演化成自主执行系统。
 
+## 学习路径
 
+| 阶段 | 学习目标 | 核心内容 |
+| --- | --- | --- |
+| [Day 0](/day0) | 建立正确心智模型 | Harness、Tool Calling 与环境准备 |
+| [Day 1–3](/day1) | 搭起 Agent 骨架 | 执行循环、工具系统与 System Prompt |
+| [Day 4–6](/day4) | 获得可扩展能力 | Skill、MCP 与上下文压缩 |
+| [Day 7](/day7) | 组装完整运行时 | 配置、日志、会话与 CLI |
 
-<div class="home-quote">
-  <span>核心公式</span>
-  <code>Agent = Model + Harness</code>
-  <p>用可以读懂的 Go 代码，掌握模型之外真正决定 Agent 能力上限的工程系统。</p>
-</div>
+::: tip 核心公式
+
+**Agent = Model + Harness**
+
+用可以读懂的 Go 代码，掌握模型之外真正决定 Agent 能力上限的工程系统。
+
+:::
