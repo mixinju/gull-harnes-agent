@@ -17,32 +17,44 @@ hero:
       link: https://git.sankuai.com/~mixinju/gull-harness-agent
 
 features:
-  - icon: 01
+  - icon:
+      src: /icons/agent-loop.svg
+      alt: Agent Loop
     title: Agent Loop
     details: 从零实现 think → act → observe 循环，理解模型如何在多轮执行中自主完成任务。
     link: /day1
     linkText: 学习执行循环
-  - icon: 02
+  - icon:
+      src: /icons/tool-system.svg
+      alt: Tool System
     title: Tool System
     details: 设计统一 Tool 接口与注册表，接入 Bash、文件读写等可插拔工具。
     link: /day2
     linkText: 构建工具系统
-  - icon: 03
+  - icon:
+      src: /icons/prompt-engineering.svg
+      alt: Prompt Engineering
     title: Prompt Engineering
     details: 动态组装身份、规则、能力与工作上下文，让 System Prompt 成为运行时的一部分。
     link: /day3
     linkText: 设计系统提示词
-  - icon: 04
+  - icon:
+      src: /icons/skill-mcp.svg
+      alt: Skill and MCP
     title: Skill & MCP
     details: 通过 Skill 渐进披露知识，通过 MCP 标准协议连接外部工具服务。
     link: /day4
     linkText: 扩展 Agent 能力
-  - icon: 05
+  - icon:
+      src: /icons/context-management.svg
+      alt: Context Management
     title: Context Management
     details: 估算 Token、校准真实用量并自动摘要压缩，让长任务保持关键记忆。
     link: /day6
     linkText: 管理上下文
-  - icon: 06
+  - icon:
+      src: /icons/production-assembly.svg
+      alt: Production Assembly
     title: Production Assembly
     details: 将配置、日志、会话和所有模块组装为一个真正可运行的命令行 Agent。
     link: /day7
