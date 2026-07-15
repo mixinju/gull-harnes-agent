@@ -4,14 +4,11 @@ layout: home
 hero:
   name: Gull Agent Harness
   text: 从模型调用到自主行动
-  tagline: 七天、约千行 Go 代码，亲手构建一个能思考、会用工具、可持续扩展的 AI Agent 运行时。
+  tagline: 七天、约千行代码，亲手构建一个能思考、会用工具、可持续扩展的 AI Agent 运行时。
   actions:
     - theme: brand
-      text: 开始七日教程
+      text: 开始阅读
       link: /day0
-    - theme: alt
-      text: 阅读 Agent Loop
-      link: /day1
     - theme: alt
       text: 查看源码
       link: https://github.com/mixinju/gull-harnes-agent/
