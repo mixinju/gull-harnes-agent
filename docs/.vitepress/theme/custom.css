@@ -1,3 +1,26 @@
-/* sidebar width */
-.VPSidebar{width:240px!important}
-.VPDoc .content-container{max-width:720px!important}
+/* Keep the sidebar and document layout on the same width value to avoid overlap. */
+:root {
+  --vp-sidebar-width: 240px;
+}
+
+.VPDoc .content-container {
+  max-width: 720px !important;
+}
+
+/* Agent 序列图：跟随深色/浅色模式自动切换颜色
+   用属性选择器精确匹配 SVG 内写死的颜色值，覆盖 presentation attribute。
+   白色/红色/绿色等语义色不受影响，保持原样。 */
+.agent-seq-diagram text[fill="#1e293b"] { fill: var(--vp-c-text-1); }
+.agent-seq-diagram text[fill="#64748b"] { fill: var(--vp-c-text-2); }
+.agent-seq-diagram [stroke="#475569"] { stroke: var(--vp-c-text-2); }
+.agent-seq-diagram [fill="#475569"] { fill: var(--vp-c-text-2); }
+.agent-seq-diagram [stroke="#94a3b8"] { stroke: var(--vp-c-text-3); }
+.agent-seq-diagram [stroke="#cbd5e1"] { stroke: var(--vp-c-divider); }
+
+/* Tool Calling 序列图：同样的主题适配规则 */
+.tool-call-seq-diagram text[fill="#1e293b"] { fill: var(--vp-c-text-1); }
+.tool-call-seq-diagram text[fill="#64748b"] { fill: var(--vp-c-text-2); }
+.tool-call-seq-diagram [stroke="#475569"] { stroke: var(--vp-c-text-2); }
+.tool-call-seq-diagram [fill="#475569"] { fill: var(--vp-c-text-2); }
+.tool-call-seq-diagram [stroke="#94a3b8"] { stroke: var(--vp-c-text-3); }
+.tool-call-seq-diagram [stroke="#cbd5e1"] { stroke: var(--vp-c-divider); }

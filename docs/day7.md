@@ -85,7 +85,7 @@ $ claude
 
 把 Day 1-6 的模块组装后，一次完整的 Agent 运行流程如下：
 
-<svg viewBox="0 0 660 780" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:660px;margin:16px auto;display:block;font-family:-apple-system,'PingFang SC',sans-serif;font-size:12px">
+<svg viewBox="0 0 660 780" xmlns="http://www.w3.org/2000/svg" class="agent-seq-diagram" style="width:100%;max-width:660px;margin:16px auto;display:block;font-family:-apple-system,'PingFang SC',sans-serif;font-size:12px">
   <defs>
     <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
       <path d="M 0 0 L 10 5 L 0 10 z" fill="#475569"/>

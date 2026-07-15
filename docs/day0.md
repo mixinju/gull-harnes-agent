@@ -4,6 +4,8 @@
 
 用七天时间，从零手写一个轻量但完整的 **Agent Harness 框架**，语言是 Go。
 
+我们给这个 Agent 起名叫 **Gull**（海鸥）——像海鸥一样轻量、灵活，能在海面（复杂任务）上穿梭自如。项目里所有的环境变量、配置项、模块名都以 `GULL_` 或 `gull` 为前缀，方便识别。
+
 最终产出是一个约 1000 行的可运行框架，它能做到这些事：
 
 - 接收用户的自然语言指令
@@ -36,6 +38,23 @@
 Agent = Model + Harness
 ```
 
+:::info Harness 释义
+**Harness** /ˈhɑːrnɪs/
+
+- **n. 马具、挽具** —— 套在马身上用来拉车或控制的装备
+- **n. 安全带、背带** —— 攀岩、降落伞等用于固定的带子装置
+- **v. 驾驭、利用** ⭐ 最常用 —— 将某种力量或资源收集起来加以利用
+
+> 例：*The company **harnessed** AI to improve customer service.*
+> 该公司利用 AI 来改善客户服务。
+
+**在技术领域**，你也常会看到这个词：
+
+- **Test Harness** —— 测试框架 / 测试工具集
+- **Agent Harness** —— 驾驭 Agent 的框架（本教程的主题）
+
+> 一句话记忆：**harness = 把野马套住来为你干活 → 驾驭、利用** 🐴
+:::
 **Model** 是大语言模型本身（GPT、Claude、DeepSeek 等），负责推理和生成。
 
 **Harness** 是模型之外的一切：系统提示词、工具定义与执行、消息管理、技能模块、子代理编排、安全边界。它是包裹在模型周围的完整运行时基础设施。
@@ -54,15 +73,24 @@ Harness 的核心职责包括：
 
 :::tip 这么多新名词，如何学的过来？
 
-其实从我个人看来，不断涌向的新名词更多的是一种推广和营销的手段，其实本质上可能一直都没变过，只不过有了新的解决方案后，需要一个新名词来
-进行区分和推广而已。
+其实从我个人看来，不断涌向的新名词更多的是一种推广和营销的手段，其实本质上可能一直都没变过，只不过有了新的解决方案后，
+需要一个新名词的来立足和出圈。
 :::
+
+## 适合对象
+
+本教程适合以下读者：
+
+- 想进一步学习 **Agent Loop** 与 **Agent Harness**，系统理解 Agent 从接收任务、调用模型与工具到完成任务的完整执行流程
+- 对 Claude Code、Codex、WorkBuddy 等 Agent 产品的核心执行引擎及其运行机制感兴趣
+- 不满足于只会使用 Agent，希望进一步了解其底层设计、调度逻辑与工程实现
 
 ## 为什么从零写，不用框架
 
 Go 生态已经有 Eino（字节）、tRPC-Agent-Go（腾讯）、Google ADK-Go 这些框架了。为什么不直接用？
 
-原因很简单：**框架帮你隐藏了复杂度，但 Agent 的核心竞争力恰恰在 Harness 层的调优**。
+原因很简单：**框架帮我们隐藏了复杂度，底层的调用和运作都是黑盒，但 Agent 的核心竞争力恰恰在 Harness 层的调优，
+尤其是当调试Prompt和编写SKILL已经到达瓶颈时候，了解 `Harness` 的原理可以更好的针对性调优，甚至开发符合自己业务需求的Agent**。
 
 类比 Web 开发：你可以用 Gin 写 HTTP 服务，但当你遇到性能瓶颈、诡异的中间件顺序问题、需要自定义协议时，只有理解 `net/http` 底层的人才能解决。Agent 开发也是一样——当你的 Agent 表现不好时，问题几乎总是出在 Harness 层：prompt 写得不对、工具描述不清晰、上下文被截断丢了关键信息、消息格式有问题。
 
@@ -71,13 +99,16 @@ Go 生态已经有 Eino（字节）、tRPC-Agent-Go（腾讯）、Google ADK-Go 
 - 精确理解 Agent Loop 的每一步在做什么
 - 遇到问题时知道该去哪里排查
 - 有能力针对特定场景做深度定制
-- 面试时说"我手写过 Agent 框架"而不是"我调过 LangChain"
+- 经验分享时说"我手写过 Agent 框架"而不是"我调过 LangChain"
 
 写完这个教程后，你再去看 Eino 或任何框架的源码，会发现一切都是似曾相识的。
 
 ## 为什么用 Go
 
-不是"为了用 Go 而用 Go"。Go 在 Agent 框架开发中有几个天然优势：
+> 首先不要对语言有任何恐惧，我们的重点不在于通过这个Agent教程学习某一个语言，仅仅是选取了一个语言来表达我们的逻辑而已，
+不需要有任何语言基础，可以看到要表达的逻辑即可。
+
+不是"为了用 Go 而用 Go"，Go 在 Agent 框架开发中有几个天然优势：
 
 **interface 做工具抽象**。Go 的 interface 是隐式实现的，定义一个 `Tool` interface 后，任何实现了对应方法的 struct 自动满足接口。新增一个工具不需要继承、不需要注册装饰器，写一个 struct 就行。
 
@@ -90,7 +121,7 @@ Go 生态已经有 Eino（字节）、tRPC-Agent-Go（腾讯）、Google ADK-Go 
 **error 作为值**。工具执行可能失败，Go 的 error handling 让你在每一步都显式处理失败情况，把错误信息友好地返回给 LLM，而不是一个未捕获的异常炸掉整个循环。
 
 
-:::info
+:::info 🔔
 其实也很简单，Java不太适合作为终端应用，我不太会TS和Python，Go语言既有不错的开发效率，语法特性也比较适合。
 :::
 
@@ -233,8 +264,8 @@ tools := []openai.ChatCompletionToolParam{
           "arguments": "",
           "name": ""
         },
-        "tool_calls": [ // [!code highlight]
-          { // [!code highlight]
+        "tool_calls": [ // [!code focus:10]
+          {
             "id": "call_00_tAXgHjzPvOI7Q1cjOzqf6169",
             "function": {
               "arguments": "{\"city\": \"北京\"}",
@@ -340,7 +371,7 @@ for _, call := range msg.ToolCalls {
       ],
       "role": "assistant"
     },
-    {
+    { // [!code focus:5]
       "content": "北京 当前天气：多云，气温 32℃，湿度 73%",
       "tool_call_id": "call_00_tAXgHjzPvOI7Q1cjOzqf6169",
       "role": "tool"
@@ -419,24 +450,73 @@ for _, call := range msg.ToolCalls {
 ```
 
 模型看到工具结果后，生成最终的自然语言回答：
-
 > 北京今天天气晴朗，气温 22℃，湿度 55%，适合户外活动～
 
+:::warning 为什么执行工具调用之后还需要再调用一次大模型呢？
+这里的例子比较简单，可能我们觉得，直接调用工具不就已经完成了任务了吗？ 其实并不是，我们是站在上帝视角去看的，模型需要知道工具调用的结果，根据结果进行
+下一步的处理，所以必须需要一次调用，把这次的结果传递回去，对于一些特殊的场景，比如：调用失败了，模型得到了一个失败的异常，就会根据异常更换其他方式或者重试。
+:::
 **完整交互序列图**
 
-```mermaid
-sequenceDiagram
-    participant Code as 你的代码
-    participant API as LLM API
+<svg viewBox="0 0 660 580" xmlns="http://www.w3.org/2000/svg" class="tool-call-seq-diagram" style="width:100%;max-width:660px;margin:16px auto;display:block;font-family:-apple-system,'PingFang SC',sans-serif;font-size:12px">
+  <defs>
+    <marker id="tcArr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#475569"/>
+    </marker>
+    <marker id="tcArrR" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8"/>
+    </marker>
+  </defs>
 
-    Code->>API: POST /chat/completions<br/>messages: [system, user]<br/>tools: [getWeather]
-    API-->>Code: tool_calls: [{<br/>  name: "getWeather"<br/>  arguments: {"city":"北京"}<br/>  id: "call_abc123"<br/>}]
+  <!-- 参与者头部 -->
+  <rect x="110" y="15" width="120" height="34" rx="4" fill="#3b82f6" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="170" y="32" text-anchor="middle" dominant-baseline="central" fill="#fff" font-weight="600">你的代码</text>
+  <rect x="440" y="15" width="120" height="34" rx="4" fill="#3b82f6" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="500" y="32" text-anchor="middle" dominant-baseline="central" fill="#fff" font-weight="600">LLM API</text>
 
-    Note over Code: 执行 getWeather("北京")<br/>结果: "北京 当前天气：晴，气温 22℃，湿度 55%"
+  <!-- 生命线 -->
+  <line x1="170" y1="49" x2="170" y2="565" stroke="#cbd5e1" stroke-width="1.5" stroke-dasharray="4 4"/>
+  <line x1="500" y1="49" x2="500" y2="565" stroke="#cbd5e1" stroke-width="1.5" stroke-dasharray="4 4"/>
 
-    Code->>API: POST /chat/completions<br/>messages: [..., tool(result, call_abc123)]
-    API-->>Code: content: "北京今天天气晴朗，气温 22℃，湿度 55%，适合户外活动～"
-```
+  <!-- 激活条 -->
+  <rect x="165" y="60" width="10" height="500" fill="#3b82f6" fill-opacity="0.18" stroke="#3b82f6" stroke-width="0.8"/>
+
+  <!-- 消息 1: Code → API -->
+  <text x="335" y="78" text-anchor="middle" fill="#1e293b">POST /chat/completions</text>
+  <text x="335" y="94" text-anchor="middle" fill="#64748b">messages: [system, user] · tools: [getWeather]</text>
+  <line x1="175" y1="104" x2="498" y2="104" stroke="#475569" stroke-width="1.5" marker-end="url(#tcArr)"/>
+
+  <!-- 消息 2: API → Code (返回 tool_calls) -->
+  <text x="335" y="130" text-anchor="middle" fill="#1e293b">tool_calls: [{</text>
+  <text x="335" y="146" text-anchor="middle" fill="#64748b">name: "getWeather" · arguments: {"city":"北京"}</text>
+  <text x="335" y="162" text-anchor="middle" fill="#64748b">id: "call_abc123" }]</text>
+  <line x1="500" y1="172" x2="177" y2="172" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="6 4" marker-end="url(#tcArrR)"/>
+
+  <!-- Note over Code -->
+  <rect x="45" y="195" width="250" height="70" rx="4" fill="#fef3c7" stroke="#f59e0b" stroke-width="1.2"/>
+  <text x="170" y="214" text-anchor="middle" fill="#92400e" font-weight="600">执行 getWeather("北京")</text>
+  <text x="170" y="234" text-anchor="middle" fill="#92400e">结果: "北京 当前天气：晴，</text>
+  <text x="170" y="250" text-anchor="middle" fill="#92400e">气温 22℃，湿度 55%"</text>
+
+  <!-- 消息 3: Code → API (带 tool 结果) -->
+  <text x="335" y="293" text-anchor="middle" fill="#1e293b">POST /chat/completions</text>
+  <text x="335" y="309" text-anchor="middle" fill="#64748b">messages: [..., tool(result, call_abc123)]</text>
+  <line x1="175" y1="319" x2="498" y2="319" stroke="#475569" stroke-width="1.5" marker-end="url(#tcArr)"/>
+
+  <!-- 消息 4: API → Code (最终回复) -->
+  <text x="335" y="345" text-anchor="middle" fill="#1e293b">content: "北京今天天气晴朗，</text>
+  <text x="335" y="361" text-anchor="middle" fill="#1e293b">气温 22℃，湿度 55%，适合户外活动～"</text>
+  <line x1="500" y1="371" x2="177" y2="371" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="6 4" marker-end="url(#tcArrR)"/>
+
+  <!-- 最终输出 -->
+  <text x="170" y="405" text-anchor="middle" fill="#64748b" font-style="italic">代码拿到最终回复，</text>
+  <text x="170" y="421" text-anchor="middle" fill="#64748b" font-style="italic">输出给用户</text>
+
+  <!-- 终止标记 -->
+  <circle cx="170" cy="460" r="7" fill="none" stroke="#475569" stroke-width="1.5"/>
+  <line x1="165" y1="455" x2="175" y2="465" stroke="#475569" stroke-width="1.5"/>
+  <line x1="175" y1="455" x2="165" y2="465" stroke="#475569" stroke-width="1.5"/>
+</svg>
 
 这就是 Tool Calling 的完整闭环。几个重要的认知：
 
@@ -449,6 +529,7 @@ sequenceDiagram
 
 System Prompt 是 Agent 的"灵魂设定"。它告诉模型：你是谁、你能做什么、有哪些规则要遵守、当前有哪些工具可用。一个好的 Harness 会动态组装 System Prompt——根据加载的 Skill、注册的工具、用户的偏好来拼接。
 
+
 ### Skill（技能模块）
 
 Skill 是一种可插拔的能力单元。每个 Skill 是一个目录，包含一个描述文件（说明这个技能做什么、什么时候触发）和可选的额外工具。加载一个 Skill，就是把它的描述注入 System Prompt、把它的工具注册到工具表。
@@ -459,7 +540,7 @@ MCP 是 Anthropic 提出的一个标准协议，用于让 Agent 通过统一的�
 
 ### 对话压缩
 
-LLM 的上下文窗口是有限的（4K、8K、128K tokens 不等）。当对话越来越长，你需要一种策略来压缩历史：保留最近的对话、把旧的历史压缩成摘要。这个"管理上下文窗口"的工作，也是 Harness 的职责。
+LLM 的上下文窗口是有限的（从最初的 `64K` 到 `128K` ，再到后续的 `200K` 、`1M` 等tokens 不等）。当对话越来越长，你需要一种策略来压缩历史：保留最近的对话、把旧的历史压缩成摘要。这个"管理上下文窗口"的工作，也是 Harness 的职责。
 
 ## 环境准备
 
@@ -531,10 +612,10 @@ import (
 )
 
 func main() {
-	apiKey := os.Getenv("LLM_API_KEY")
-	baseURL := os.Getenv("LLM_BASE_URL") // 例如 https://api.deepseek.com/v1
+	apiKey := os.Getenv("GULL_OPENAI_API_KEY")
+	baseURL := os.Getenv("GULL_OPENAI_BASE_URL") // 例如 https://api.deepseek.com
 	if apiKey == "" || baseURL == "" {
-		fmt.Println("请设置环境变量 LLM_API_KEY 和 LLM_BASE_URL")
+		fmt.Println("请设置环境变量 GULL_OPENAI_API_KEY 和 GULL_OPENAI_BASE_URL")
 		os.Exit(1)
 	}
 
@@ -551,7 +632,7 @@ func main() {
 		Messages: []openai.ChatCompletionMessageParamUnion{
 			openai.UserMessage("用一句话解释什么是 Agent Loop"),
 		},
-		Model: openai.ChatModelGPT4oMini, // 根据你的 API 替换模型名
+		Model: "deepseek-v4-flash", // 根据你的 API 替换模型名
 	})
 	if err != nil {
 		fmt.Printf("请求失败: %v\n", err)
@@ -569,16 +650,18 @@ func main() {
 
 代码说明：
 
-- `openai.NewClient` 创建客户端，`WithBaseURL` 让它支持任意 OpenAI 兼容 API（DeepSeek、Ollama 等）
-- `openai.UserMessage` 是 SDK 提供的快捷构造方法，等价于手动构造 `{role: "user", content: "..."}`
-- `openai.ChatModelGPT4oMini` 是 SDK 内置的模型常量，你也可以直接传字符串如 `"deepseek-chat"`
-- `chatCompletion.Choices[0].Message.Content` 是类型安全的字段访问，比手写 JSON 解析更可靠
+| API / 字段 | 含义                                                           |
+|-----------|--------------------------------------------------------------|
+| `openai.NewClient` | 创建客户端，配合 `WithBaseURL` 支持任意 OpenAI 兼容 API（DeepSeek、Ollama 等） |
+| `openai.UserMessage` | SDK 快捷构造方法，构造用户消息，等价于 `{role: "user", content: "..."}`       |
+| `deepseek-v4-flash` | 模型id，可以直接传字符串即可                                              |
+| `chatCompletion.Choices[0].Message.Content` | 类型安全的字段访问，读取回复内容，比手写 JSON 解析更可靠                              |
 
 运行验证：
 
 ```bash
-export LLM_API_KEY="your-api-key"
-export LLM_BASE_URL="https://api.deepseek.com/v1"  # 或你用的服务地址
+export GULL_OPENAI_API_KEY="your-api-key"
+export GULL_OPENAI_BASE_URL="https://api.deepseek.com"  # 或你用的服务地址
 
 go run cmd/agent/main.go
 ```
