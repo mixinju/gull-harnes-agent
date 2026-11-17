@@ -5,15 +5,29 @@ import (
 	"os"
 	"strings"
 
+	"gull-herness-agent/sandbox"
+
 	"github.com/openai/openai-go"
 )
 
 // FileReadTool 读取文件内容，支持分片读取和行号标注。
-type FileReadTool struct{}
+// 路径检查发生在读取当时，和 tool.before hook 的事前拒绝是两层。
+type FileReadTool struct {
+	sb    *sandbox.Sandbox
+	sbErr error
+}
 
-// NewFileReadTool 创建一个 FileReadTool 实例。
+// NewFileReadTool 创建一个带默认沙箱的 FileReadTool。
 func NewFileReadTool() *FileReadTool {
-	return &FileReadTool{}
+	sb, err := sandbox.Default()
+	return &FileReadTool{sb: sb, sbErr: err}
+}
+
+// SetSandbox 替换沙箱。
+func (t *FileReadTool) SetSandbox(sb *sandbox.Sandbox) *FileReadTool {
+	t.sb = sb
+	t.sbErr = nil
+	return t
 }
 
 func (t *FileReadTool) Name() string {
@@ -21,9 +35,13 @@ func (t *FileReadTool) Name() string {
 }
 
 func (t *FileReadTool) Description() string {
-	return "读取指定文件的内容，带行号标注。" +
+	desc := "读取指定文件的内容，带行号标注。" +
 		"适用场景：查看源代码、阅读日志文件、检查配置文件等。" +
 		"支持通过 offset（起始行）和 limit（行数限制）进行分片读取，避免一次输出过多内容。"
+	if t != nil && t.sb != nil && t.sb.Enabled() {
+		desc += "只能读取沙箱允许的路径。"
+	}
+	return desc
 }
 
 func (t *FileReadTool) Schema() openai.FunctionDefinitionParam {
@@ -55,6 +73,14 @@ func (t *FileReadTool) Execute(args map[string]any) (string, error) {
 	path, ok := args["path"].(string)
 	if !ok || path == "" {
 		return "", fmt.Errorf("缺少必填参数: path")
+	}
+	sb, err := t.sandbox()
+	if err != nil {
+		return "", err
+	}
+	path, err = sb.Resolve(path, false)
+	if err != nil {
+		return "", err
 	}
 
 	data, err := os.ReadFile(path)
@@ -137,4 +163,17 @@ func toInt(v any, defaultVal int) int {
 	default:
 		return defaultVal
 	}
+}
+
+func (t *FileReadTool) sandbox() (*sandbox.Sandbox, error) {
+	if t == nil || t.sb == nil {
+		if t != nil && t.sbErr != nil {
+			return nil, t.sbErr
+		}
+		return nil, fmt.Errorf("%w: file_read 沙箱未配置", sandbox.ErrIsolation)
+	}
+	if t.sbErr != nil {
+		return nil, t.sbErr
+	}
+	return t.sb, nil
 }

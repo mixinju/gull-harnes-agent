@@ -41,6 +41,22 @@ type Config struct {
 
 	// MCPConfig 是 MCP 服务配置文件路径。
 	MCPConfig string `json:"mcp_config"`
+
+	// Sandbox 是本地沙箱。缺省时按默认安全策略启用。
+	Sandbox *SandboxConfig `json:"sandbox,omitempty"`
+}
+
+// SandboxConfig 是调用方可以覆盖的本地沙箱。
+// Enabled 用指针区分“没写”和“显式关闭”：没写则默认开启。
+type SandboxConfig struct {
+	Enabled             *bool    `json:"enabled,omitempty"`
+	Workspace           string   `json:"workspace,omitempty"`
+	AllowedPaths        []string `json:"allowed_paths,omitempty"`
+	ReadOnlyPaths       []string `json:"read_only_paths,omitempty"`
+	BashMode            string   `json:"bash_mode,omitempty"`
+	AllowNetwork        *bool    `json:"allow_network,omitempty"`
+	ProcessIsolation    string   `json:"process_isolation,omitempty"`
+	ExtraDeniedCommands []string `json:"extra_denied_commands,omitempty"`
 }
 
 // Load 从 JSON 文件加载配置。
@@ -98,4 +114,3 @@ func Load(path string) (*Config, error) {
 
 	return &cfg, nil
 }
-
