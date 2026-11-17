@@ -17,9 +17,9 @@ import (
 // 直接 Marshal 会产生大量空字段，且格式不稳定。这里用简单结构体规避序列化难题，
 // 只保留持久化和回放所需的必要信息。
 type Message struct {
-	Role       string     `json:"role"`                  // system / user / assistant / tool
-	Content    string     `json:"content,omitempty"`     // 文本内容
-	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`  // 仅 assistant 消息有
+	Role       string     `json:"role"`                   // system / user / assistant / tool
+	Content    string     `json:"content,omitempty"`      // 文本内容
+	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`   // 仅 assistant 消息有
 	ToolCallID string     `json:"tool_call_id,omitempty"` // 仅 tool 消息有
 }
 
@@ -30,16 +30,25 @@ type ToolCall struct {
 	Args string `json:"args"`
 }
 
+// 会话状态。cancelled 只在调用方取消 context 或 hook 短路时出现。
+const (
+	StatusRunning   = "running"
+	StatusCompleted = "completed"
+	StatusError     = "error"
+	StatusCancelled = "cancelled"
+)
+
 // Session 记录一次完整的 Agent 运行。
 //
 // 每次 Run() 对应一个 Session，包含元数据（模型、耗时、token 消耗）
 // 和完整的消息历史。会话以 JSON 文件持久化到 SessionDir 目录下。
 type Session struct {
-	ID          string    `json:"id"`            // 时间戳格式：20260630-143052
+	ID          string    `json:"id"` // 时间戳格式：20260630-143052
 	CreatedAt   time.Time `json:"created_at"`
 	Model       string    `json:"model"`
 	UserPrompt  string    `json:"user_prompt"`
-	Status      string    `json:"status"`        // running / completed / error
+	Status      string    `json:"status"` // running / completed / error / cancelled
+	TraceID     string    `json:"trace_id,omitempty"`
 	Iterations  int       `json:"iterations"`
 	TotalTokens int64     `json:"total_tokens"`
 	Duration    string    `json:"duration"`
@@ -67,6 +76,14 @@ func (s *Session) AddMessage(msg openai.ChatCompletionMessageParamUnion) {
 // SetStatus 更新会话状态。
 func (s *Session) SetStatus(status string) {
 	s.Status = status
+}
+
+// SetTraceID 把本次运行的 trace id 记到会话上，便于和日志对照。
+func (s *Session) SetTraceID(id string) {
+	if s == nil {
+		return
+	}
+	s.TraceID = id
 }
 
 // SetMetrics 记录运行结束时的指标。
@@ -204,4 +221,3 @@ func toolContentToString(c openai.ChatCompletionToolMessageParamContentUnion) st
 	}
 	return string(sb)
 }
-

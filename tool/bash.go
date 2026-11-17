@@ -49,13 +49,22 @@ func (t *BashTool) Schema() openai.FunctionDefinitionParam {
 }
 
 func (t *BashTool) Execute(args map[string]any) (string, error) {
+	return t.ExecuteContext(context.Background(), args)
+}
+
+// ExecuteContext 执行命令。父 context 被取消时，子进程会一起停。
+// 30 秒上限仍然在，取它和父 context 里更早的那个。
+func (t *BashTool) ExecuteContext(ctx context.Context, args map[string]any) (string, error) {
 	command, ok := args["command"].(string)
 	if !ok || command == "" {
 		return "", fmt.Errorf("缺少必填参数: command")
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
 
 	// 30 秒超时保护，防止命令挂死
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "bash", "-c", command)

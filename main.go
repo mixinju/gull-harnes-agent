@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -11,6 +12,7 @@ import (
 	"gull-herness-agent/config"
 	"gull-herness-agent/logger"
 	"gull-herness-agent/mcp"
+	"gull-herness-agent/observe"
 	"gull-herness-agent/prompt"
 	"gull-herness-agent/session"
 	"gull-herness-agent/skill"
@@ -93,7 +95,18 @@ func main() {
 	lg.Info("[启动] 会话已创建: %s", sess.ID)
 	lg.Info("")
 
-	// 10. 创建 Agent 并启动
+	// 10. 内置 trace。只有设置了 OTEL_EXPORTER_OTLP_ENDPOINT 才向外导出。
+	tracer := observe.NewTracer()
+	otelTracer, shutdown, err := observe.StartOTLP(context.Background())
+	if err != nil {
+		lg.Error("OTEL 导出未启用: %v", err)
+	} else if otelTracer != nil {
+		tracer.UseOTEL(otelTracer)
+		defer shutdown(context.Background())
+		lg.Info("[启动] OTEL 导出已启用")
+	}
+
+	// 11. 创建 Agent 并启动
 	ag := agent.New(client,
 		agent.WithModel(cfg.Model),
 		agent.WithRegistry(registry),
@@ -103,15 +116,16 @@ func main() {
 		agent.WithMaxIterations(cfg.MaxIterations),
 		agent.WithLogger(lg),
 		agent.WithSession(sess),
+		agent.WithTracer(tracer),
 	)
 	ag.Run()
 
-	// 11. 保存会话
+	// 12. 保存会话
 	if err := sess.Save(cfg.SessionDir); err != nil {
 		lg.Error("保存会话失败: %v", err)
 	} else {
 		lg.Info("")
-		lg.Info("[完成] 会话已保存: %s/%s.json (%d 轮, %d tokens)",
-			cfg.SessionDir, sess.ID, sess.Iterations, sess.TotalTokens)
+		lg.Info("[完成] 会话已保存: %s/%s.json (%d 轮, %d tokens, trace %s)",
+			cfg.SessionDir, sess.ID, sess.Iterations, sess.TotalTokens, sess.TraceID)
 	}
 }
