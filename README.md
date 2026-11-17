@@ -14,6 +14,7 @@
 - **MCP 集成**：连接外部 MCP Server，扩展 Agent 工具集
 - **会话记录**：保存执行轮次、Token 用量和历史消息
 - **运行日志**：记录模型调用、工具执行及异常信息
+- **本地沙箱**：文件和 bash 默认在 bubblewrap 里执行，只能看见挂载进去的路径，默认没有网络
 - **七日教程**：从基础概念到完整 Agent Harness，逐步讲解实现过程
 
 ## 项目结构
@@ -26,6 +27,7 @@
 ├── logger/      # 运行日志
 ├── mcp/         # MCP 客户端与工具适配
 ├── prompt/      # System Prompt 构建
+├── sandbox/     # bubblewrap 沙箱：挂载、进程和网络隔离
 ├── session/     # 会话模型与持久化
 ├── skill/       # Skill 定义与加载器
 ├── skills/      # 可加载的技能目录
@@ -68,7 +70,12 @@ export GULL_OPENAI_BASE_URL="https://your-openai-compatible-api.example.com"
   "log_dir": "logs",
   "session_dir": "sessions",
   "skills_dir": "./skills",
-  "mcp_config": "config/mcp.json"
+  "mcp_config": "config/mcp.json",
+  "sandbox": {
+    "enabled": true,
+    "workspace": ".",
+    "allow_network": false
+  }
 }
 ```
 
@@ -89,6 +96,14 @@ go run . 帮我检查 main.go 是否存在问题
 ```bash
 go run . -config path/to/config.json -prompt "你的问题"
 ```
+
+## 本地沙箱
+
+`file_read`、`file_write` 和 `bash` 默认通过本机的 bubblewrap 执行，调用方用 `config.json` 的 `sandbox` 段覆盖。不写这段时也是默认安全策略。`enabled: false` 才回到原来的全开放行为。找不到 `bwrap` 时启动失败，不会静默改成无沙箱。
+
+- **挂载**：`workspace` 可读写。`allowed_paths` 额外可读写，`read_only_paths` 只读。没有挂进去的宿主机路径在沙箱里看不见，沙箱根目录是只读的。
+- **进程**：子进程使用清理过的环境变量，不带 API key。默认再隔离网络。超时会结束整个进程组。
+- **和 hook 的关系**：`tool.before` 可以在执行前改写或拒绝这一次调用，被拒绝的调用不会进沙箱。调用真的开始执行之后，bubblewrap 做隔离。两层都留着，沙箱不实现、也不替换 hook。
 
 ## MCP 配置
 

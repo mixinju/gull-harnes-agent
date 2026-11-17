@@ -12,6 +12,7 @@ import (
 	"gull-herness-agent/logger"
 	"gull-herness-agent/mcp"
 	"gull-herness-agent/prompt"
+	"gull-herness-agent/sandbox"
 	"gull-herness-agent/session"
 	"gull-herness-agent/skill"
 	"gull-herness-agent/tool"
@@ -58,12 +59,23 @@ func main() {
 		option.WithBaseURL(cfg.BaseURL),
 	)
 
-	// 4. 注册工具
+	// 4. 本地沙箱。bubblewrap 负责隔离；配置可以改挂载和网络，或显式关闭。
+	// tool.before hook 仍可在执行前单独拒绝一次调用，沙箱不取代那一层。
+	sbOpt, err := sandbox.OptionsFromConfig(cfg.Sandbox)
+	if err != nil {
+		log.Fatalf("解析沙箱配置失败: %v", err)
+	}
+	sb, err := sandbox.New(sbOpt)
+	if err != nil {
+		log.Fatalf("初始化沙箱失败: %v", err)
+	}
+	lg.Info("[启动] 沙箱: %s", sb.Summary())
+
 	registry := tool.NewRegistry()
 	registry.Register(tool.NewWeatherTool())
-	registry.Register(tool.NewBashTool())
-	registry.Register(tool.NewFileReadTool())
-	registry.Register(tool.NewFileWriteTool())
+	registry.Register(tool.NewBashTool().SetSandbox(sb))
+	registry.Register(tool.NewFileReadTool().SetSandbox(sb))
+	registry.Register(tool.NewFileWriteTool().SetSandbox(sb))
 
 	// 5. 从 config/mcp.json 加载 MCP 工具（降级：失败不影响内置工具）
 	defer mcp.LoadAll(registry, cfg.MCPConfig)()
@@ -79,8 +91,11 @@ func main() {
 		WithSkills(skills).
 		WithRule(prompt.RuleSelfDebug).
 		WithRule(prompt.RuleReadBeforeWrite).
-		WithRule(prompt.RuleFailGracefully).
-		WithWorkingContext()
+		WithRule(prompt.RuleFailGracefully)
+	if sb.Enabled() {
+		pb = pb.WithRule("文件读写和 bash 跑在 bubblewrap 沙箱里。只能使用挂载进沙箱的路径，默认不能访问网络。")
+	}
+	pb = pb.WithWorkingContext()
 
 	// 8. 创建上下文管理器：带 LLM 摘要能力，token 超阈值时自动压缩历史
 	ctx := agent.NewContext(

@@ -2,18 +2,31 @@ package tool
 
 import (
 	"fmt"
-	"os"
 	"strings"
+
+	"gull-herness-agent/sandbox"
 
 	"github.com/openai/openai-go"
 )
 
 // FileReadTool 读取文件内容，支持分片读取和行号标注。
-type FileReadTool struct{}
+// 读取发生在沙箱里。tool.before hook 如果拒绝了这次调用，不会走到这里。
+type FileReadTool struct {
+	sb    *sandbox.Sandbox
+	sbErr error
+}
 
-// NewFileReadTool 创建一个 FileReadTool 实例。
+// NewFileReadTool 创建一个带默认沙箱的 FileReadTool。
 func NewFileReadTool() *FileReadTool {
-	return &FileReadTool{}
+	sb, err := sandbox.Default()
+	return &FileReadTool{sb: sb, sbErr: err}
+}
+
+// SetSandbox 替换沙箱。
+func (t *FileReadTool) SetSandbox(sb *sandbox.Sandbox) *FileReadTool {
+	t.sb = sb
+	t.sbErr = nil
+	return t
 }
 
 func (t *FileReadTool) Name() string {
@@ -21,9 +34,13 @@ func (t *FileReadTool) Name() string {
 }
 
 func (t *FileReadTool) Description() string {
-	return "读取指定文件的内容，带行号标注。" +
+	desc := "读取指定文件的内容，带行号标注。" +
 		"适用场景：查看源代码、阅读日志文件、检查配置文件等。" +
 		"支持通过 offset（起始行）和 limit（行数限制）进行分片读取，避免一次输出过多内容。"
+	if t != nil && t.sb != nil && t.sb.Enabled() {
+		desc += "读取发生在 bubblewrap 沙箱里，看不见没有挂载进去的路径。"
+	}
+	return desc
 }
 
 func (t *FileReadTool) Schema() openai.FunctionDefinitionParam {
@@ -56,13 +73,13 @@ func (t *FileReadTool) Execute(args map[string]any) (string, error) {
 	if !ok || path == "" {
 		return "", fmt.Errorf("缺少必填参数: path")
 	}
-
-	data, err := os.ReadFile(path)
+	sb, err := t.sandbox()
 	if err != nil {
-		if os.IsNotExist(err) {
-			return "", fmt.Errorf("文件不存在: %s", path)
-		}
-		return "", fmt.Errorf("读取文件失败: %v", err)
+		return "", err
+	}
+	data, err := sb.ReadFile(path)
+	if err != nil {
+		return "", err
 	}
 
 	lines := strings.Split(string(data), "\n")
@@ -137,4 +154,17 @@ func toInt(v any, defaultVal int) int {
 	default:
 		return defaultVal
 	}
+}
+
+func (t *FileReadTool) sandbox() (*sandbox.Sandbox, error) {
+	if t == nil || t.sb == nil {
+		if t != nil && t.sbErr != nil {
+			return nil, t.sbErr
+		}
+		return nil, fmt.Errorf("%w: file_read 沙箱未配置", sandbox.ErrIsolation)
+	}
+	if t.sbErr != nil {
+		return nil, t.sbErr
+	}
+	return t.sb, nil
 }

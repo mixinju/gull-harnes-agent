@@ -7,6 +7,13 @@
   "log_dir": "logs",
   "session_dir": "sessions",
   "skills_dir": "./skills",
-  "mcp_config": "config/mcp.json"
+  "mcp_config": "config/mcp.json",
+  "sandbox": {
+    "enabled": true,
+    "workspace": ".",
+    "allow_network": false,
+    "allowed_paths": [],
+    "read_only_paths": []
+  }
 }
 

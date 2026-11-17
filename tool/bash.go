@@ -1,23 +1,35 @@
 package tool
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"os/exec"
 	"strings"
 	"time"
+
+	"gull-herness-agent/sandbox"
 
 	"github.com/openai/openai-go"
 )
 
 // BashTool 是一个在子进程中执行 bash 命令的工具。
-type BashTool struct{}
+// 沙箱在 Execute 里生效。tool.before hook 如果拒绝了这次调用，不会走到这里。
+type BashTool struct {
+	sb    *sandbox.Sandbox
+	sbErr error
+}
 
-// NewBashTool 创建一个 BashTool 实例。
+// NewBashTool 创建一个带默认沙箱的 BashTool。
 func NewBashTool() *BashTool {
-	return &BashTool{}
+	sb, err := sandbox.Default()
+	return &BashTool{sb: sb, sbErr: err}
+}
+
+// SetSandbox 替换沙箱。传 sandbox.Disabled() 可以回到全开放行为。
+func (t *BashTool) SetSandbox(sb *sandbox.Sandbox) *BashTool {
+	t.sb = sb
+	t.sbErr = nil
+	return t
 }
 
 func (t *BashTool) Name() string {
@@ -25,10 +37,14 @@ func (t *BashTool) Name() string {
 }
 
 func (t *BashTool) Description() string {
-	return "执行 bash 命令并返回标准输出。" +
+	desc := "执行 bash 命令并返回标准输出。" +
 		"适用场景：文件列表（ls/cat）、文本处理（grep/wc/sed）、" +
 		"代码运行（go build/python）、系统信息查询（uname/pwd/env）等。" +
 		"每次调用只执行一条命令，复杂操作请使用 && 或管道拼接。"
+	if t != nil && t.sb != nil && t.sb.Enabled() {
+		desc += "命令在 bubblewrap 沙箱里执行，只能看见工作区和配置挂载进去的路径，默认没有网络。"
+	}
+	return desc
 }
 
 func (t *BashTool) Schema() openai.FunctionDefinitionParam {
@@ -54,21 +70,23 @@ func (t *BashTool) Execute(args map[string]any) (string, error) {
 		return "", fmt.Errorf("缺少必填参数: command")
 	}
 
-	// 30 秒超时保护，防止命令挂死
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	sb, err := t.sandbox()
+	if err != nil {
+		return "", err
+	}
 
-	cmd := exec.CommandContext(ctx, "bash", "-c", command)
-	// 让子进程继承当前工作目录
-	cmd.Dir = "."
-
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	err := cmd.Run()
-	stdoutStr := strings.TrimSpace(stdout.String())
-	stderrStr := strings.TrimSpace(stderr.String())
+	// 30 秒超时保护，防止命令挂死。
+	// 隔离失败直接返回，不会降级成无沙箱执行。
+	const timeout = 30 * time.Second
+	stdout, stderr, err := sb.RunCommand(context.Background(), command, timeout)
+	if errors.Is(err, sandbox.ErrIsolation) || errors.Is(err, context.DeadlineExceeded) {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return "", fmt.Errorf("命令执行超时（30s限制）: %s", command)
+		}
+		return "", err
+	}
+	stdoutStr := strings.TrimSpace(stdout)
+	stderrStr := strings.TrimSpace(stderr)
 
 	// 输出截断，避免超长输出撑爆上下文窗口
 	const maxOutput = 4000
@@ -93,11 +111,6 @@ func (t *BashTool) Execute(args map[string]any) (string, error) {
 		result.WriteString(stderrStr)
 	}
 
-	// 超时处理
-	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return "", fmt.Errorf("命令执行超时（30s限制）: %s", command)
-	}
-
 	// 命令执行失败（非零退出码）
 	if err != nil {
 		if result.Len() == 0 {
@@ -112,4 +125,17 @@ func (t *BashTool) Execute(args map[string]any) (string, error) {
 	}
 
 	return result.String(), nil
+}
+
+func (t *BashTool) sandbox() (*sandbox.Sandbox, error) {
+	if t == nil {
+		return nil, fmt.Errorf("%w: bash 工具未初始化", sandbox.ErrIsolation)
+	}
+	if t.sbErr != nil {
+		return nil, t.sbErr
+	}
+	if t.sb == nil {
+		return nil, fmt.Errorf("%w: bash 沙箱未配置", sandbox.ErrIsolation)
+	}
+	return t.sb, nil
 }
