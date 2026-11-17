@@ -385,10 +385,10 @@ registry.Register(tool.NewFileWriteTool())
 ---
 
 :::warning 本地沙箱：默认不再是全开放
-Day 2 最初的三个内置工具故意没有做路径和命令限制。当前仓库已经在工具执行时加上本地沙箱，默认策略是：
+Day 2 最初的三个内置工具故意没有做路径和命令限制。当前仓库在工具执行时用 bubblewrap 做隔离，默认策略是：
 
-- **FileReadTool / FileWriteTool**：只能访问工作区、`allowed_paths` 和只读路径。`/etc/passwd`、`~/.ssh/id_rsa` 这类越界路径会在打开前被拒绝
-- **BashTool**：`rm -rf /`、`curl | bash`、写块设备这类危险命令不会启动进程。Linux 上子进程还有 Landlock 文件系统和 TCP 限制
+- **FileReadTool / FileWriteTool**：读写发生在沙箱里。工作区、`allowed_paths` 和只读路径会挂进去；`/etc/passwd` 这类没有挂载的路径在沙箱里不存在
+- **BashTool**：同一套挂载和进程隔离。`rm -rf /` 改不到没有挂进去的宿主机文件，默认也不能打开网络
 - **显式关闭**：配置里把 `sandbox.enabled` 设为 `false`，行为回到下面说的全开放，只适合本地学习
 
 沙箱是执行时的隔离。`tool.before` hook 如果接上了，仍然可以在这之前单独拒绝一次调用，两层互不替换。

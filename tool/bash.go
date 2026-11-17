@@ -41,8 +41,8 @@ func (t *BashTool) Description() string {
 		"适用场景：文件列表（ls/cat）、文本处理（grep/wc/sed）、" +
 		"代码运行（go build/python）、系统信息查询（uname/pwd/env）等。" +
 		"每次调用只执行一条命令，复杂操作请使用 && 或管道拼接。"
-	if t != nil && t.sb != nil && t.sb.Enabled() && t.sb.BashMode() == sandbox.BashRestricted {
-		desc += "命令在本地沙箱中执行：危险命令会被拒绝，文件访问限制在工作区和允许路径内。"
+	if t != nil && t.sb != nil && t.sb.Enabled() {
+		desc += "命令在 bubblewrap 沙箱里执行，只能看见工作区和配置挂载进去的路径，默认没有网络。"
 	}
 	return desc
 }
@@ -76,13 +76,13 @@ func (t *BashTool) Execute(args map[string]any) (string, error) {
 	}
 
 	// 30 秒超时保护，防止命令挂死。
-	// 策略拒绝和隔离失败在进程启动前或启动时返回，不会降级成无沙箱执行。
+	// 隔离失败直接返回，不会降级成无沙箱执行。
 	const timeout = 30 * time.Second
 	stdout, stderr, err := sb.RunCommand(context.Background(), command, timeout)
-	if errors.Is(err, context.DeadlineExceeded) {
-		return "", fmt.Errorf("命令执行超时（30s限制）: %s", command)
-	}
-	if errors.Is(err, sandbox.ErrRefused) || errors.Is(err, sandbox.ErrIsolation) {
+	if errors.Is(err, sandbox.ErrIsolation) || errors.Is(err, context.DeadlineExceeded) {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return "", fmt.Errorf("命令执行超时（30s限制）: %s", command)
+		}
 		return "", err
 	}
 	stdoutStr := strings.TrimSpace(stdout)

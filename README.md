@@ -14,7 +14,7 @@
 - **MCP 集成**：连接外部 MCP Server，扩展 Agent 工具集
 - **会话记录**：保存执行轮次、Token 用量和历史消息
 - **运行日志**：记录模型调用、工具执行及异常信息
-- **本地沙箱**：文件和 bash 默认限制在工作区里。危险命令不会启动，Linux 上的子进程再用 Landlock 收紧文件系统和 TCP
+- **本地沙箱**：文件和 bash 默认在 bubblewrap 里执行，只能看见挂载进去的路径，默认没有网络
 - **七日教程**：从基础概念到完整 Agent Harness，逐步讲解实现过程
 
 ## 项目结构
@@ -27,7 +27,7 @@
 ├── logger/      # 运行日志
 ├── mcp/         # MCP 客户端与工具适配
 ├── prompt/      # System Prompt 构建
-├── sandbox/     # 本地沙箱：路径、命令和子进程隔离
+├── sandbox/     # bubblewrap 沙箱：挂载、进程和网络隔离
 ├── session/     # 会话模型与持久化
 ├── skill/       # Skill 定义与加载器
 ├── skills/      # 可加载的技能目录
@@ -74,7 +74,6 @@ export GULL_OPENAI_BASE_URL="https://your-openai-compatible-api.example.com"
   "sandbox": {
     "enabled": true,
     "workspace": ".",
-    "bash_mode": "restricted",
     "allow_network": false
   }
 }
@@ -100,12 +99,11 @@ go run . -config path/to/config.json -prompt "你的问题"
 
 ## 本地沙箱
 
-`file_read`、`file_write` 和 `bash` 默认走本地沙箱，调用方用 `config.json` 的 `sandbox` 段覆盖。不写这段时也是默认安全策略。`enabled: false` 才回到原来的全开放行为。
+`file_read`、`file_write` 和 `bash` 默认通过本机的 bubblewrap 执行，调用方用 `config.json` 的 `sandbox` 段覆盖。不写这段时也是默认安全策略。`enabled: false` 才回到原来的全开放行为。找不到 `bwrap` 时启动失败，不会静默改成无沙箱。
 
-- **工作区**：相对路径落在 `workspace` 里。`allowed_paths` 额外可读写，`read_only_paths` 只能读。符号链接解析后如果跑到这些目录外面，会被拒绝。
-- **命令**：`bash_mode` 为 `restricted`（默认）、`none` 或 `full`。`restricted` 在进程启动前拒绝危险命令和越界路径；`none` 不跑 shell；`full` 不再做命令黑名单，但仍然套着下面的进程隔离。
-- **进程**：子进程使用清理过的环境变量，不带 API key。超时会结束整个进程组。Linux 上默认再套 Landlock：工作区可写，解释器和系统库只读，默认禁止 TCP。隔离初始化失败就拒绝这次执行，不会静默改成无沙箱。
-- **和 hook 的关系**：`tool.before` 可以在执行前改写或拒绝这一次调用，被拒绝的调用不会进沙箱。调用真的开始执行之后，沙箱继续限制路径、命令和子进程。两层都留着，沙箱不实现、也不替换 hook。
+- **挂载**：`workspace` 可读写。`allowed_paths` 额外可读写，`read_only_paths` 只读。没有挂进去的宿主机路径在沙箱里看不见，沙箱根目录是只读的。
+- **进程**：子进程使用清理过的环境变量，不带 API key。默认再隔离网络。超时会结束整个进程组。
+- **和 hook 的关系**：`tool.before` 可以在执行前改写或拒绝这一次调用，被拒绝的调用不会进沙箱。调用真的开始执行之后，bubblewrap 做隔离。两层都留着，沙箱不实现、也不替换 hook。
 
 ## MCP 配置
 

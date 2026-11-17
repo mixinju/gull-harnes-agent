@@ -2,7 +2,6 @@ package tool
 
 import (
 	"encoding/json"
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,7 +23,7 @@ func newTools(t *testing.T, opt sandbox.Options) (*sandbox.Sandbox, *BashTool, *
 	return sb, NewBashTool().SetSandbox(sb), NewFileReadTool().SetSandbox(sb), NewFileWriteTool().SetSandbox(sb)
 }
 
-func TestFileToolsAllowWorkspaceAndRejectOutside(t *testing.T) {
+func TestFileToolsStayInsideBubblewrap(t *testing.T) {
 	ws := t.TempDir()
 	extra := t.TempDir()
 	ro := t.TempDir()
@@ -41,11 +40,12 @@ func TestFileToolsAllowWorkspaceAndRejectOutside(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := read.Execute(map[string]any{"path": "nested/a.txt"})
-	if err != nil {
-		t.Fatal(err)
+	if err != nil || !strings.Contains(got, "hello") {
+		t.Fatalf("read = %s err=%v", got, err)
 	}
-	if !strings.Contains(got, "hello") {
-		t.Fatalf("read = %s", got)
+	host, err := os.ReadFile(filepath.Join(ws, "nested", "a.txt"))
+	if err != nil || string(host) != "hello" {
+		t.Fatalf("host workspace = %q err=%v", host, err)
 	}
 
 	if _, err := write.Execute(map[string]any{"path": filepath.Join(extra, "b.txt"), "content": "extra"}); err != nil {
@@ -60,64 +60,71 @@ func TestFileToolsAllowWorkspaceAndRejectOutside(t *testing.T) {
 	if err != nil || !strings.Contains(got, "read-only") {
 		t.Fatalf("read-only read=%s err=%v", got, err)
 	}
-	if _, err := write.Execute(map[string]any{"path": filepath.Join(ro, "note.txt"), "content": "nope"}); !errors.Is(err, sandbox.ErrRefused) {
-		t.Fatalf("read-only write err=%v", err)
+	if _, err := write.Execute(map[string]any{"path": filepath.Join(ro, "note.txt"), "content": "nope"}); err == nil {
+		t.Fatal("read-only write succeeded")
+	}
+	host, err = os.ReadFile(filepath.Join(ro, "note.txt"))
+	if err != nil || string(host) != "read-only" {
+		t.Fatalf("read-only host changed to %q err=%v", host, err)
 	}
 
-	if _, err := read.Execute(map[string]any{"path": "/etc/passwd"}); !errors.Is(err, sandbox.ErrRefused) {
-		t.Fatalf("outside read err=%v", err)
+	if _, err := read.Execute(map[string]any{"path": "/etc/passwd"}); err == nil {
+		t.Fatal("read /etc/passwd succeeded")
 	}
-	outside := filepath.Join(t.TempDir(), "nope.txt")
-	if _, err := write.Execute(map[string]any{"path": outside, "content": "x"}); !errors.Is(err, sandbox.ErrRefused) {
-		t.Fatalf("outside write err=%v", err)
+	secret := filepath.Join(t.TempDir(), "secret")
+	if err := os.WriteFile(secret, []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
 	}
-	if _, statErr := os.Stat(outside); !os.IsNotExist(statErr) {
-		t.Fatal("outside file was created")
+	_, _ = write.Execute(map[string]any{"path": secret, "content": "gone"})
+	host, err = os.ReadFile(secret)
+	if err != nil || string(host) != "keep" {
+		t.Fatalf("outside write changed host to %q err=%v", host, err)
 	}
 
 	link := filepath.Join(ws, "escape")
 	if err := os.Symlink("/etc/passwd", link); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := read.Execute(map[string]any{"path": link}); !errors.Is(err, sandbox.ErrRefused) {
-		t.Fatalf("symlink err=%v", err)
+	got, err = read.Execute(map[string]any{"path": link})
+	if err == nil || strings.Contains(got, "root:") {
+		t.Fatalf("symlink result=%s err=%v", got, err)
 	}
 }
 
-func TestBashToolRefusesDangerousAndAllowsWorkspace(t *testing.T) {
+func TestBashToolRunsInsideBubblewrap(t *testing.T) {
 	ws := t.TempDir()
-	_, bash, _, write := newTools(t, sandbox.Options{Workspace: ws, BashMode: sandbox.BashRestricted})
+	_, bash, _, write := newTools(t, sandbox.Options{Workspace: ws})
 	if _, err := write.Execute(map[string]any{"path": "hello.txt", "content": "hello"}); err != nil {
 		t.Fatal(err)
 	}
 	got, err := bash.Execute(map[string]any{"command": "cat hello.txt"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(got, "hello") {
-		t.Fatalf("bash read = %s", got)
+	if err != nil || !strings.Contains(got, "hello") {
+		t.Fatalf("bash read = %s err=%v", got, err)
 	}
 
-	marker := filepath.Join(ws, "marker")
-	_, err = bash.Execute(map[string]any{"command": "printf x > marker && rm -rf /"})
-	if !errors.Is(err, sandbox.ErrRefused) {
-		t.Fatalf("err=%v", err)
+	secret := filepath.Join(t.TempDir(), "secret")
+	if err := os.WriteFile(secret, []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
 	}
-	if _, statErr := os.Stat(marker); !os.IsNotExist(statErr) {
-		t.Fatal("dangerous command started")
+	_, err = bash.Execute(map[string]any{"command": "rm -rf --no-preserve-root / " + shellQuote(secret)})
+	if err != nil {
+		t.Logf("rm returned %v", err)
+	}
+	host, readErr := os.ReadFile(secret)
+	if readErr != nil || string(host) != "keep" {
+		t.Fatalf("host secret = %q err=%v", host, readErr)
 	}
 }
 
-func TestDispatchLoopSurvivesSandboxDenial(t *testing.T) {
+func TestDispatchLoopSurvivesSandboxBoundary(t *testing.T) {
 	ws := t.TempDir()
-	_, bash, read, write := newTools(t, sandbox.Options{Workspace: ws, BashMode: sandbox.BashRestricted})
+	_, bash, read, write := newTools(t, sandbox.Options{Workspace: ws})
 	reg := NewRegistry()
 	reg.Register(NewWeatherTool())
 	reg.Register(bash)
 	reg.Register(read)
 	reg.Register(write)
 
-	// 与 Agent Loop 一样：按顺序 Dispatch，失败变成错误文本，下一轮工具继续。
 	writeArgs, _ := json.Marshal(map[string]any{"path": "note.txt", "content": "kept"})
 	if result, err := reg.Dispatch("file_write", string(writeArgs)); err != nil {
 		t.Fatal(err)
@@ -125,13 +132,24 @@ func TestDispatchLoopSurvivesSandboxDenial(t *testing.T) {
 		t.Fatalf("write result=%s", result)
 	}
 
-	if _, err := reg.Dispatch("file_read", `{"path":"/etc/passwd"}`); !errors.Is(err, sandbox.ErrRefused) {
-		t.Fatalf("outside read err=%v", err)
+	if _, err := reg.Dispatch("file_read", `{"path":"/etc/passwd"}`); err == nil {
+		t.Fatal("outside read succeeded")
 	}
-	if _, err := reg.Dispatch("bash", `{"command":"rm -rf /"}`); !errors.Is(err, sandbox.ErrRefused) {
-		t.Fatalf("dangerous bash err=%v", err)
+	secret := filepath.Join(t.TempDir(), "secret")
+	if err := os.WriteFile(secret, []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	args, _ := json.Marshal(map[string]any{"command": "rm -rf --no-preserve-root / " + shellQuote(secret)})
+	_, _ = reg.Dispatch("bash", string(args))
+	host, err := os.ReadFile(secret)
+	if err != nil || string(host) != "keep" {
+		t.Fatalf("dispatch rm changed host to %q err=%v", host, err)
 	}
 
+	writeArgs, _ = json.Marshal(map[string]any{"path": "note.txt", "content": "kept"})
+	if _, err := reg.Dispatch("file_write", string(writeArgs)); err != nil {
+		t.Fatal(err)
+	}
 	readArgs, _ := json.Marshal(map[string]any{"path": "note.txt"})
 	result, err := reg.Dispatch("file_read", string(readArgs))
 	if err != nil || !strings.Contains(result, "kept") {
@@ -141,4 +159,20 @@ func TestDispatchLoopSurvivesSandboxDenial(t *testing.T) {
 	if err != nil || !strings.Contains(weather, "北京") {
 		t.Fatalf("weather=%s err=%v", weather, err)
 	}
+}
+
+func TestDisabledSandboxWritesHost(t *testing.T) {
+	bash := NewBashTool().SetSandbox(sandbox.Disabled())
+	target := filepath.Join(t.TempDir(), "host.txt")
+	if _, err := bash.Execute(map[string]any{"command": "printf host > " + shellQuote(target)}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(target)
+	if err != nil || string(got) != "host" {
+		t.Fatalf("disabled write = %q err=%v", got, err)
+	}
+}
+
+func shellQuote(path string) string {
+	return "'" + strings.ReplaceAll(path, "'", `'\''`) + "'"
 }

@@ -11,7 +11,6 @@
   "sandbox": {
     "enabled": true,
     "workspace": ".",
-    "bash_mode": "restricted",
     "allow_network": false,
     "allowed_paths": [],
     "read_only_paths": []

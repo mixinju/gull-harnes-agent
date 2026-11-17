@@ -59,7 +59,7 @@ func main() {
 		option.WithBaseURL(cfg.BaseURL),
 	)
 
-	// 4. 本地沙箱。默认限制工作区、危险命令和子进程；配置可以放宽或显式关闭。
+	// 4. 本地沙箱。bubblewrap 负责隔离；配置可以改挂载和网络，或显式关闭。
 	// tool.before hook 仍可在执行前单独拒绝一次调用，沙箱不取代那一层。
 	sbOpt, err := sandbox.OptionsFromConfig(cfg.Sandbox)
 	if err != nil {
@@ -93,7 +93,7 @@ func main() {
 		WithRule(prompt.RuleReadBeforeWrite).
 		WithRule(prompt.RuleFailGracefully)
 	if sb.Enabled() {
-		pb = pb.WithRule("文件读写和 bash 跑在本地沙箱里。只访问工作区和配置允许的路径，不要运行会被拒绝的危险命令。")
+		pb = pb.WithRule("文件读写和 bash 跑在 bubblewrap 沙箱里。只能使用挂载进沙箱的路径，默认不能访问网络。")
 	}
 	pb = pb.WithWorkingContext()
 

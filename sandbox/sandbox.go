@@ -1,136 +1,87 @@
-// Package sandbox 在工具真正执行时做本地隔离。
+// Package sandbox 把工具执行放进本机的 bubblewrap 沙箱。
 //
-// 它不代替 tool.before hook。hook（见独立的生命周期改动）跑在
-// Registry.Dispatch 之前，可以改写或直接拒绝这一次调用；被拒绝的调用
-// 不会进入本包。调用一旦开始执行，沙箱仍然限制路径、命令和子进程。
-// hook 是事前短路，沙箱是执行时的隔离，两层都保留。本包不实现 hook。
+// 隔离由 bubblewrap 的挂载、用户、进程和网络命名空间完成，本包不自己写
+// 路径白名单判定、命令黑名单或 Landlock 规则。
 //
-// 模型来自《Github狂揽万星！腾讯开源沙箱的生产级Agent实践》里能落到这个
-// 进程内 Harness 的部分，主要是芒果 TV 的 Fence：限制文件、网络和环境变量，
-// 隔离初始化失败就拒绝执行。Bash 分成 none / restricted / full，对应文中的
-// No Bash、Restricted Bash、Full Bash，但不做文中的单次人工审批。
-// 子进程在 Linux 上用 Landlock 收紧文件系统和 TCP，并清掉凭据环境变量。
+// tool.before hook 仍然跑在 Registry.Dispatch 之前，可以改写或拒绝这一次
+// 调用。调用真的执行时才进入沙箱。两层都留，本包不实现 hook。
 package sandbox
 
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
-	"strings"
-)
-
-const (
-	BashRestricted = "restricted"
-	BashNone       = "none"
-	BashFull       = "full"
-
-	IsolationLandlock  = "landlock"
-	IsolationUserspace = "userspace"
 )
 
 // Options 是调用方可以覆盖的沙箱配置。零值不要直接传给 New，用 DefaultOptions。
 type Options struct {
 	// Enabled 为 false 时工具保持原来的全开放行为。
 	Enabled bool
-	// Workspace 是可读写的工作区，相对路径会按进程当前目录解析。
+	// Workspace 是放进沙箱并可读写的工作区。
 	Workspace string
-	// AllowedPaths 是工作区之外额外可读写的目录。
+	// AllowedPaths 是额外挂进沙箱、可读写的目录。
 	AllowedPaths []string
-	// ReadOnlyPaths 是额外只读目录。file_write 不能写，bash 的 Landlock 规则也是只读。
+	// ReadOnlyPaths 是额外只读挂进沙箱的目录。
 	ReadOnlyPaths []string
-	// BashMode 取 restricted、none、full。空字符串等同 restricted。
-	BashMode string
-	// AllowNetwork 为 true 时放行网络类命令，并且不让 Landlock 拦截 TCP。
+	// AllowNetwork 为 true 时不使用 bubblewrap 的网络命名空间隔离。
 	AllowNetwork bool
-	// ProcessIsolation 取 landlock 或 userspace。空字符串按平台默认：
-	// Linux amd64/arm64 用 landlock，其它平台用 userspace。
-	ProcessIsolation string
-	// ExtraDeniedCommands 追加到 restricted 模式的命令名黑名单，只比较 basename。
-	ExtraDeniedCommands []string
 }
 
-// DefaultOptions 是默认安全配置：开启、工作区为当前目录、restricted bash、禁止网络。
+// DefaultOptions 默认开启沙箱，工作区是当前目录，网络隔离。
 func DefaultOptions() Options {
 	return Options{
 		Enabled:      true,
 		Workspace:    ".",
-		BashMode:     BashRestricted,
 		AllowNetwork: false,
 	}
 }
 
-// Sandbox 是一份已经解析好的执行边界。文件工具和 bash 共用同一份。
+// Sandbox 是一份已经解析好的 bubblewrap 运行参数。
 type Sandbox struct {
 	enabled      bool
 	workspace    string
 	allowed      []string
 	readOnly     []string
-	bashMode     string
 	allowNetwork bool
-	isolation    string
-	denied       map[string]struct{}
+	bwrap        string
 }
 
-// New 校验配置并解析路径。工作区或允许路径不可用，或者要求的内核隔离起不来，
-// 都直接返回错误，调用方不应降级成无沙箱执行。
+// New 校验配置。沙箱开启但找不到 bwrap，或工作区不可用，都直接失败，不降级成无沙箱执行。
 func New(opt Options) (*Sandbox, error) {
 	if !opt.Enabled {
-		return &Sandbox{enabled: false, bashMode: BashFull, isolation: IsolationUserspace}, nil
+		return &Sandbox{enabled: false}, nil
 	}
-
-	mode := opt.BashMode
-	if mode == "" {
-		mode = BashRestricted
+	bwrap, err := exec.LookPath("bwrap")
+	if err != nil {
+		return nil, fmt.Errorf("%w: 找不到 bubblewrap (bwrap): %v", ErrIsolation, err)
 	}
-	switch mode {
-	case BashRestricted, BashNone, BashFull:
-	default:
-		return nil, fmt.Errorf("未知的 bash_mode: %s", mode)
-	}
-
 	workspace := opt.Workspace
 	if workspace == "" {
 		workspace = "."
 	}
-	workspace, err := resolveExistingDir(workspace)
+	workspace, err = existingDir(workspace)
 	if err != nil {
 		return nil, fmt.Errorf("沙箱工作区不可用: %w", err)
 	}
-	allowed, err := resolveExistingDirs(opt.AllowedPaths)
+	allowed, err := existingDirs(opt.AllowedPaths)
 	if err != nil {
 		return nil, fmt.Errorf("沙箱允许路径不可用: %w", err)
 	}
-	readOnly, err := resolveExistingDirs(opt.ReadOnlyPaths)
+	readOnly, err := existingDirs(opt.ReadOnlyPaths)
 	if err != nil {
 		return nil, fmt.Errorf("沙箱只读路径不可用: %w", err)
 	}
-
-	isolation := opt.ProcessIsolation
-	if isolation == "" {
-		isolation = defaultIsolation()
+	if _, err := os.Stat("/usr"); err != nil {
+		return nil, fmt.Errorf("%w: 宿主机没有 /usr，bubblewrap 无法启动命令", ErrIsolation)
 	}
-	switch isolation {
-	case IsolationLandlock:
-		if err := probeLandlock(); err != nil {
-			return nil, fmt.Errorf("%w: %s", ErrIsolation, err.Error())
-		}
-		if !opt.AllowNetwork && !landlockCanDenyNetwork() {
-			return nil, fmt.Errorf("%w: 当前 Landlock 不能限制 TCP", ErrIsolation)
-		}
-	case IsolationUserspace:
-	default:
-		return nil, fmt.Errorf("未知的 process_isolation: %s", isolation)
-	}
-
 	return &Sandbox{
 		enabled:      true,
 		workspace:    workspace,
 		allowed:      allowed,
 		readOnly:     readOnly,
-		bashMode:     mode,
 		allowNetwork: opt.AllowNetwork,
-		isolation:    isolation,
-		denied:       deniedCommands(opt.AllowNetwork, opt.ExtraDeniedCommands),
+		bwrap:        bwrap,
 	}, nil
 }
 
@@ -139,41 +90,22 @@ func Default() (*Sandbox, error) {
 	return New(DefaultOptions())
 }
 
-// Disabled 是显式关闭的沙箱，行为与加固前的工具一致。
+// Disabled 是显式关闭的沙箱。
 func Disabled() *Sandbox {
-	sb, err := New(Options{Enabled: false})
-	if err != nil {
-		// Enabled false 不会失败；这里只是让构造函数保持一个返回值。
-		return &Sandbox{enabled: false, bashMode: BashFull, isolation: IsolationUserspace}
-	}
-	return sb
+	return &Sandbox{enabled: false}
 }
 
 // Enabled 报告沙箱是否生效。
 func (s *Sandbox) Enabled() bool {
+	return s != nil && s.enabled
+}
+
+// Workspace 返回解析后的工作区绝对路径。
+func (s *Sandbox) Workspace() string {
 	if s == nil {
-		return false
+		return ""
 	}
-	return s.enabled
-}
-
-// Workspace 返回解析后的工作区绝对路径。未启用时为空。
-func (s *Sandbox) Workspace() string { return s.workspace }
-
-// BashMode 返回 none、restricted 或 full。
-func (s *Sandbox) BashMode() string {
-	if s == nil || s.bashMode == "" {
-		return BashFull
-	}
-	return s.bashMode
-}
-
-// Isolation 返回 landlock 或 userspace。
-func (s *Sandbox) Isolation() string {
-	if s == nil || s.isolation == "" {
-		return IsolationUserspace
-	}
-	return s.isolation
+	return s.workspace
 }
 
 // Summary 是启动日志用的一行摘要。
@@ -181,11 +113,10 @@ func (s *Sandbox) Summary() string {
 	if s == nil || !s.enabled {
 		return "enabled=false"
 	}
-	return fmt.Sprintf("enabled=true workspace=%s bash=%s isolation=%s network=%t",
-		s.workspace, s.bashMode, s.isolation, s.allowNetwork)
+	return fmt.Sprintf("enabled=true runtime=bubblewrap workspace=%s network=%t", s.workspace, s.allowNetwork)
 }
 
-func resolveExistingDir(path string) (string, error) {
+func existingDir(path string) (string, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return "", err
@@ -204,16 +135,10 @@ func resolveExistingDir(path string) (string, error) {
 	return resolved, nil
 }
 
-func resolveExistingDirs(paths []string) ([]string, error) {
-	if len(paths) == 0 {
-		return nil, nil
-	}
+func existingDirs(paths []string) ([]string, error) {
 	out := make([]string, 0, len(paths))
 	for _, p := range paths {
-		if strings.TrimSpace(p) == "" {
-			return nil, fmt.Errorf("路径为空")
-		}
-		resolved, err := resolveExistingDir(p)
+		resolved, err := existingDir(p)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", p, err)
 		}
