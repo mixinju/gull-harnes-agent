@@ -1,6 +1,7 @@
 package tool
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
@@ -26,6 +27,12 @@ type Tool interface {
 	// 第一个返回值为工具执行的结果字符串（会作为 ToolMessage 回传给模型），
 	// 第二个返回值为 error，表示工具执行失败（如参数非法、执行超时等）。
 	Execute(args map[string]any) (string, error)
+}
+
+// ContextExecutor 是可选接口。实现它的工具会收到 Run 的 context，
+// 会话取消时可以中断。没实现的工具仍走 Execute，行为与原来一致。
+type ContextExecutor interface {
+	ExecuteContext(ctx context.Context, args map[string]any) (string, error)
 }
 
 // Registry 是工具注册表，管理所有已注册的工具。
@@ -91,6 +98,14 @@ func (r *Registry) ToChatCompletionTools() []openai.ChatCompletionToolParam {
 // name 对应 tool_calls[].function.name，argsJSON 对应 tool_calls[].function.arguments（JSON 字符串）。
 // 工具不存在或参数解析失败时返回 error。
 func (r *Registry) Dispatch(name string, argsJSON string) (string, error) {
+	return r.DispatchContext(context.Background(), name, argsJSON)
+}
+
+// DispatchContext 与 Dispatch 相同，但会把 ctx 传给实现了 ContextExecutor 的工具。
+func (r *Registry) DispatchContext(ctx context.Context, name string, argsJSON string) (string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	t, ok := r.Get(name)
 	if !ok {
 		return "", fmt.Errorf("未知工具: %s，可用工具: %v", name, r.Names())
@@ -101,5 +116,8 @@ func (r *Registry) Dispatch(name string, argsJSON string) (string, error) {
 		return "", fmt.Errorf("解析工具 %q 的参数失败: %v", name, err)
 	}
 
+	if ct, ok := t.(ContextExecutor); ok {
+		return ct.ExecuteContext(ctx, args)
+	}
 	return t.Execute(args)
 }

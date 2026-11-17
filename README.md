@@ -13,7 +13,9 @@
 - **Skill 扩展**：通过目录动态加载可插拔技能
 - **MCP 集成**：连接外部 MCP Server，扩展 Agent 工具集
 - **会话记录**：保存执行轮次、Token 用量和历史消息
-- **运行日志**：记录模型调用、工具执行及异常信息
+- **运行日志**：记录模型调用、工具执行及异常信息，文件日志带 trace id
+- **生命周期 Hook**：会话、轮次、模型、工具、错误和上下文移交可按注册顺序组合；观察类 hook 不改结果
+- **Trace**：内置 span 覆盖会话、轮次、模型、工具和上下文移交；延迟、token、工具错误有指标。设置 `OTEL_EXPORTER_OTLP_ENDPOINT` 后可导出到 OpenTelemetry
 - **七日教程**：从基础概念到完整 Agent Harness，逐步讲解实现过程
 
 ## 项目结构
@@ -21,6 +23,8 @@
 ```text
 .
 ├── agent/       # Agent Loop、上下文管理与摘要压缩
+├── hook/        # 生命周期 hook
+├── observe/     # 内置 trace、指标、可选 OTEL 导出
 ├── config/      # Agent 与 MCP 配置
 ├── docs/        # VitePress 七日教程
 ├── logger/      # 运行日志

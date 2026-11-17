@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+
+	"gull-herness-agent/observe"
 )
 
 // Level 是日志级别别名，对齐 slog.Level。
@@ -70,23 +72,48 @@ func New(logDir string) (*Logger, error) {
 // Step 记录关键步骤或决策，同时输出到终端和文件。
 // 用于：迭代开始、模型响应摘要、工具调用、终止决策等。
 func (l *Logger) Step(format string, args ...any) {
+	l.StepContext(context.Background(), format, args...)
+}
+
+// StepContext 与 Step 相同，但文件日志会带上 ctx 里的 trace_id 和 span_id。
+// 终端仍然只打印正文，避免 time=/level= 前缀。
+func (l *Logger) StepContext(ctx context.Context, format string, args ...any) {
+	if l == nil {
+		return
+	}
 	msg := fmt.Sprintf(format, args...)
 	_, _ = fmt.Fprintln(os.Stdout, msg)
-	l.slog.Log(context.Background(), StepLevel, msg)
+	l.write(ctx, StepLevel, msg)
 }
 
 // Info 记录启动阶段的信息，同时输出到终端和文件。
 func (l *Logger) Info(format string, args ...any) {
+	l.InfoContext(context.Background(), format, args...)
+}
+
+// InfoContext 与 Info 相同，文件日志附带 trace id。
+func (l *Logger) InfoContext(ctx context.Context, format string, args ...any) {
+	if l == nil {
+		return
+	}
 	msg := fmt.Sprintf(format, args...)
 	_, _ = fmt.Fprintln(os.Stdout, msg)
-	l.slog.Info(msg)
+	l.write(ctx, slog.LevelInfo, msg)
 }
 
 // Error 记录错误信息，同时输出到终端 stderr 和文件。
 func (l *Logger) Error(format string, args ...any) {
+	l.ErrorContext(context.Background(), format, args...)
+}
+
+// ErrorContext 与 Error 相同，文件日志附带 trace id。
+func (l *Logger) ErrorContext(ctx context.Context, format string, args ...any) {
+	if l == nil {
+		return
+	}
 	msg := fmt.Sprintf(format, args...)
 	_, _ = fmt.Fprintln(os.Stderr, msg)
-	l.slog.Error(msg)
+	l.write(ctx, slog.LevelError, msg)
 }
 
 // Debug 记录调试细节，仅写入文件（终端不显示，避免噪音）。
@@ -97,7 +124,35 @@ func (l *Logger) Debug(format string, args ...any) {
 // JSON 记录原始 JSON 载荷（如 LLM 请求体/响应体），仅写入文件。
 // tag 作为属性名，v 作为属性值（会被 slog 序列化为 JSON）。
 func (l *Logger) JSON(tag string, v any) {
-	l.slog.With(tag, v).Debug("raw payload")
+	l.JSONContext(context.Background(), tag, v)
+}
+
+// JSONContext 与 JSON 相同，并附带 ctx 中的 trace id。
+func (l *Logger) JSONContext(ctx context.Context, tag string, v any) {
+	if l == nil {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	attrs := []any{tag, v}
+	if traceID, spanID := observe.IDs(ctx); traceID != "" {
+		attrs = append(attrs, "trace_id", traceID, "span_id", spanID)
+	}
+	l.slog.DebugContext(ctx, "raw payload", attrs...)
+}
+
+// write 把一条日志写入文件。终端输出由调用方负责，这里不加 slog 前缀。
+func (l *Logger) write(ctx context.Context, level slog.Level, msg string) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	traceID, spanID := observe.IDs(ctx)
+	if traceID == "" {
+		l.slog.Log(ctx, level, msg)
+		return
+	}
+	l.slog.Log(ctx, level, msg, "trace_id", traceID, "span_id", spanID)
 }
 
 // Close 关闭日志文件。
@@ -110,4 +165,3 @@ func (l *Logger) Close() error {
 
 // 兼容 io.Closer 接口（保留给可能的外部引用）
 var _ io.Closer = (*Logger)(nil)
-

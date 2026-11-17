@@ -68,13 +68,23 @@ func (a *Adapter) Schema() openai.FunctionDefinitionParam {
 
 // Execute 将工具调用委托给 MCP server。
 func (a *Adapter) Execute(args map[string]any) (string, error) {
-	result, err := a.client.CallTool(context.Background(), a.sdkTool.Name, args)
+	return a.ExecuteContext(context.Background(), args)
+}
+
+// ExecuteContext 将工具调用委托给 MCP server，并使用调用方的 context。
+func (a *Adapter) ExecuteContext(ctx context.Context, args map[string]any) (string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	result, err := a.client.CallTool(ctx, a.sdkTool.Name, args)
 	if err != nil {
 		return "", fmt.Errorf("mcp tool %q 执行失败: %w", a.sdkTool.Name, err)
 	}
 	return result, nil
 }
 
-// 编译期检查 Adapter 实现了 tool.Tool 接口。
-var _ tool.Tool = (*Adapter)(nil)
-
+// 编译期检查 Adapter 实现了 tool.Tool 和可选的 ContextExecutor。
+var (
+	_ tool.Tool            = (*Adapter)(nil)
+	_ tool.ContextExecutor = (*Adapter)(nil)
+)
